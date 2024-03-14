@@ -453,11 +453,10 @@ impl HistoryImpl {
     /// Figure out the offsets of our file contents.
     fn populate_from_file_contents(&mut self) {
         self.old_item_offsets.clear();
+
         if let Some(file_contents) = &self.file_contents {
-            for offset in file_contents.item_offsets(Some(self.boundary_timestamp)) {
-                // Remember this item.
-                self.old_item_offsets.push_back(offset);
-            }
+            let iter = file_contents.item_offsets(Some(self.boundary_timestamp));
+            self.old_item_offsets.extend(iter);
         }
 
         FLOGF!(history, "Loaded %lu old items", self.old_item_offsets.len());
@@ -558,31 +557,30 @@ impl HistoryImpl {
 
         // Read in existing items (which may have changed out from underneath us, so don't trust our
         // old file contents).
-        if let Some(existing_fd) = existing_fd {
-            if let Some(local_file) = HistoryFileContents::create(existing_fd) {
-                for offset in local_file.item_offsets(None) {
-                    // Try decoding an old item.
-                    let Some(old_item) = local_file.decode_item(offset) else {
-                        continue;
-                    };
 
-                    // If old item is newer than session always erase if in deleted.
-                    if old_item.timestamp() > self.boundary_timestamp {
-                        if old_item.is_empty() || self.deleted_items.contains_key(old_item.str()) {
-                            continue;
-                        }
-                        lru.add_item(old_item);
-                    } else {
-                        // If old item is older and in deleted items don't erase if added by
-                        // clear_session.
-                        if old_item.is_empty()
-                            || self.deleted_items.get(old_item.str()) == Some(&false)
-                        {
-                            continue;
-                        }
-                        // Add this old item.
-                        lru.add_item(old_item);
-                    }
+        if let Some(local_file) = existing_fd.and_then(HistoryFileContents::create) {
+            for offset in local_file.item_offsets(None) {
+                // Try decoding an old item.
+                let Some(old_item) = local_file.decode_item(offset) else {
+                    continue;
+                };
+
+                if old_item.is_empty() {
+                    continue;
+                }
+
+                // Was the item deleted? By whom?
+                let should_erase = match self.deleted_items.get(old_item.str()) {
+                    // If deleted by clear_session(), only erase if newer than session.
+                    Some(true) => old_item.timestamp() > self.boundary_timestamp,
+                    // If deleted by remove(), always erase.
+                    Some(false) => true,
+                    // The item was not deleted.
+                    None => false,
+                };
+
+                if !should_erase {
+                    lru.add_item(old_item);
                 }
             }
         }
