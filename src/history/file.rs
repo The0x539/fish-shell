@@ -444,13 +444,17 @@ impl<'a> ItemOffsets<'a> {
             return None;
         }
 
-        if let Some(i) = self.cursor.iter().position(|c| *c == b'\n') {
-            let (left, right) = (&self.cursor[..i], &self.cursor[i + 1..]);
-            self.cursor = right;
-            Some(left)
-        } else {
-            Some(std::mem::take(&mut self.cursor))
-        }
+        // Find the terminating newline.
+        let Some(i) = self.cursor.iter().position(|c| *c == b'\n') else {
+            // No trailing newline means the line is "incomplete" and should not be yielded.
+            self.cursor = b"";
+            return None;
+        };
+
+        // Split the slice at the newline.
+        let (head, tail) = (&self.cursor[..i], &self.cursor[i + 1..]);
+        self.cursor = tail;
+        Some(head)
     }
 
     fn next_timestamp(&mut self) -> Option<SystemTime> {
