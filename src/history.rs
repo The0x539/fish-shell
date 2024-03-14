@@ -454,10 +454,7 @@ impl HistoryImpl {
     fn populate_from_file_contents(&mut self) {
         self.old_item_offsets.clear();
         if let Some(file_contents) = &self.file_contents {
-            let mut cursor = 0;
-            while let Some(offset) =
-                file_contents.offset_of_next_item(&mut cursor, Some(self.boundary_timestamp))
-            {
+            for offset in file_contents.item_offsets(Some(self.boundary_timestamp)) {
                 // Remember this item.
                 self.old_item_offsets.push_back(offset);
             }
@@ -563,8 +560,7 @@ impl HistoryImpl {
         // old file contents).
         if let Some(existing_fd) = existing_fd {
             if let Some(local_file) = HistoryFileContents::create(existing_fd) {
-                let mut cursor = 0;
-                while let Some(offset) = local_file.offset_of_next_item(&mut cursor, None) {
+                for offset in local_file.item_offsets(None) {
                     // Try decoding an old item.
                     let Some(old_item) = local_file.decode_item(offset) else {
                         continue;

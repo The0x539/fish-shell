@@ -13,6 +13,8 @@ use libc::{
 };
 
 use super::{HistoryItem, PersistenceMode};
+#[allow(unused_imports)]
+use crate::future::{IsSomeAnd, TrimAscii};
 use crate::{
     common::{str2wcstring, subslice_position, wcs2string},
     flog::FLOG,
@@ -151,20 +153,9 @@ impl HistoryFileContents {
     }
 
     /// Support for iterating item offsets.
-    /// The cursor should initially be 0.
     /// If cutoff is given, skip items whose timestamp is newer than cutoff.
-    /// Returns the offset of the next item, or [`None`] on end.
-    pub fn offset_of_next_item(
-        &self,
-        cursor: &mut usize,
-        cutoff: Option<SystemTime>,
-    ) -> Option<usize> {
-        offset_of_next_item_fish_2_0(self.contents(), cursor, cutoff)
-    }
-
-    /// Returns a view of the file contents.
-    pub fn contents(&self) -> &[u8] {
-        &self.region
+    pub fn item_offsets(&self, cutoff: Option<SystemTime>) -> impl Iterator<Item = usize> + '_ {
+        ItemOffsets::new(&self.region, cutoff)
     }
 }
 
@@ -311,10 +302,6 @@ fn read_line(data: &[u8]) -> (usize, &[u8]) {
     }
 }
 
-fn trim_start(s: &[u8]) -> &[u8] {
-    &s[s.iter().take_while(|c| c.is_ascii_whitespace()).count()..]
-}
-
 /// Trims leading spaces in the given string, returning how many there were.
 fn trim_leading_spaces(s: &[u8]) -> (usize, &[u8]) {
     let count = s.iter().take_while(|c| **c == b' ').count();
@@ -329,7 +316,7 @@ fn extract_prefix_and_unescape_yaml(line: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
 
     let mut key = key.to_owned();
     // Skip a space after the : if necessary.
-    let mut value = trim_start(value).to_owned();
+    let mut value = value.trim_ascii_start().to_owned();
 
     unescape_yaml_fish_2_0(&mut key);
     unescape_yaml_fish_2_0(&mut value);
@@ -339,7 +326,7 @@ fn extract_prefix_and_unescape_yaml(line: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
 /// Decode an item via the fish 2.0 format.
 fn decode_item_fish_2_0(mut data: &[u8]) -> Option<HistoryItem> {
     let (advance, line) = read_line(data);
-    let line = trim_start(line);
+    let line = line.trim_ascii_start();
     let (key, value) = extract_prefix_and_unescape_yaml(line)?;
 
     if key != b"- cmd" {
@@ -426,114 +413,108 @@ pub fn time_to_seconds(ts: SystemTime) -> i64 {
     }
 }
 
-/// Parse a timestamp line that looks like this: spaces, "when:", spaces, timestamp, newline
-/// We know the string contains a newline, so stop when we reach it.
+/// Parse a timestamp line that looks like this: spaces, "when:", spaces, timestamp
 fn parse_timestamp(s: &[u8]) -> Option<SystemTime> {
-    let s = trim_start(s);
-    let s = s.strip_prefix(b"when:")?;
-    let s = trim_start(s);
+    let s = s
+        .trim_ascii_start()
+        .strip_prefix(b"when:")?
+        .trim_ascii_start();
 
     let t = std::str::from_utf8(s).ok()?.parse().ok()?;
     Some(time_from_seconds(t))
 }
 
-fn complete_lines(s: &[u8]) -> impl Iterator<Item = &[u8]> {
-    let mut lines = s.split(|&c| c == b'\n');
-    // Remove either the last empty element (in case last line is newline-terminated) or the
-    // trailing non-newline-terminated line
-    lines.next_back();
-    lines
+struct ItemOffsets<'a> {
+    full_contents: &'a [u8],
+    cursor: &'a [u8],
+    cutoff: Option<SystemTime>,
 }
 
-/// Support for iteratively locating the offsets of history items.
-/// Pass the file contents and a mutable reference to a `cursor`, initially 0.
-/// If `cutoff_timestamp` is given, skip items created at or after that timestamp.
-/// Returns [`None`] when done.
-fn offset_of_next_item_fish_2_0(
-    contents: &[u8],
-    cursor: &mut usize,
-    cutoff_timestamp: Option<SystemTime>,
-) -> Option<usize> {
-    let mut lines = complete_lines(&contents[*cursor..]).peekable();
-    while let Some(mut line) = lines.next() {
-        // Skip lines with a leading space, since these are in the interior of one of our items.
-        if line.starts_with(b" ") {
-            continue;
+impl<'a> ItemOffsets<'a> {
+    fn new(contents: &'a [u8], cutoff: Option<SystemTime>) -> Self {
+        Self {
+            full_contents: contents,
+            cursor: contents,
+            cutoff,
+        }
+    }
+
+    fn next_line(&mut self) -> Option<&'a [u8]> {
+        if self.cursor.is_empty() {
+            return None;
         }
 
-        // Try to be a little YAML compatible. Skip lines with leading %, ---, or ...
-        if line.starts_with(b"%") || line.starts_with(b"---") || line.starts_with(b"...") {
-            continue;
+        if let Some(i) = self.cursor.iter().position(|c| *c == b'\n') {
+            let (left, right) = (&self.cursor[..i], &self.cursor[i + 1..]);
+            self.cursor = right;
+            Some(left)
+        } else {
+            Some(std::mem::take(&mut self.cursor))
         }
+    }
 
-        // Hackish: fish 1.x rewriting a fish 2.0 history file can produce lines with lots of
-        // leading "- cmd: - cmd: - cmd:". Trim all but one leading "- cmd:".
-        while line.starts_with(b"- cmd: - cmd: ") {
-            // Skip over just one of the - cmd. In the end there will be just one left.
-            line = line.strip_prefix(b"- cmd: ").unwrap();
+    fn next_timestamp(&mut self) -> Option<SystemTime> {
+        while self.cursor.starts_with(b" ") {
+            let line = self.next_line()?;
+            if let Some(timestamp) = parse_timestamp(line) {
+                return Some(timestamp);
+            }
         }
+        None
+    }
+}
 
-        // Hackish: fish 1.x rewriting a fish 2.0 history file can produce commands like "when:
-        // 123456". Ignore those.
-        if line.starts_with(b"- cmd:    when:") {
-            continue;
-        }
+impl Iterator for ItemOffsets<'_> {
+    type Item = usize;
 
-        // At this point, we know `line` is at the beginning of an item. But maybe we want to
-        // skip this item because of timestamps. A `None` cutoff means we don't care; if we do care,
-        // then try parsing out a timestamp.
-        if let Some(cutoff_timestamp) = cutoff_timestamp {
-            // Hackish fast way to skip items created after our timestamp. This is the mechanism by
-            // which we avoid "seeing" commands from other sessions that started after we started.
-            // We try hard to ensure that our items are sorted by their timestamps, so in theory we
-            // could just break, but I don't think that works well if (for example) the clock
-            // changes. So we'll read all subsequent items.
-            // Walk over lines that we think are interior. These lines are not null terminated, but
-            // are guaranteed to contain a newline.
-            let mut timestamp = None;
-            loop {
-                let Some(interior_line) = lines.next_if(|l| l.starts_with(b" ")) else {
-                    // If the first character is not a space, it's not an interior line, so we're done.
-                    break;
-                };
-
-                // Try parsing a timestamp from this line. If we succeed, the loop will break.
-                timestamp = parse_timestamp(interior_line);
-                if timestamp.is_some() {
-                    break;
-                }
+    fn next(&mut self) -> Option<usize> {
+        while let Some(mut line) = self.next_line() {
+            // Skip lines with a leading space, since these are in the interior of one of our items.
+            if line.starts_with(b" ") {
+                continue;
             }
 
-            // Skip this item if the timestamp is past our cutoff.
-            if let Some(timestamp) = timestamp {
-                if timestamp > cutoff_timestamp {
+            // Try to be a little YAML compatible. Skip lines with leading %, ---, or ...
+            if line.starts_with(b"%") || line.starts_with(b"---") || line.starts_with(b"...") {
+                continue;
+            }
+
+            // Hackish: fish 1.x rewriting a fish 2.0 history file can produce
+            // lines with lots of leading "- cmd: - cmd: - cmd:". Trim all but one.
+            while line.starts_with(b"- cmd: - cmd: ") {
+                // Skip over just one of the - cmd. In the end there will be just one left.
+                line = line.strip_prefix(b"- cmd: ").unwrap();
+            }
+
+            // Hackish: fish 1.x rewriting a fish 2.0 history file can produce
+            // commands like "when: 123456". Ignore those.
+            if line.starts_with(b"- cmd:    when:") {
+                continue;
+            }
+
+            // At this point, we know `line` is at the beginning of an item.
+            // But maybe we want to skip this item because of timestamps.
+            // A `None` cutoff means we don't care;
+            // if we do care, then try parsing out a timestamp.
+            if let Some(cutoff) = self.cutoff {
+                // Hackish fast way to skip items created after our timestamp.
+                // This is the mechanism by which we avoid "seeing" commands
+                // from other sessions that started after we started.
+
+                // Consume interior lines until we find a timestamp,
+                // then check if it's newer than the cutoff.
+                if self.next_timestamp().is_some_and(|t| t > cutoff) {
+                    // We try hard to ensure that our items are sorted by their timestamps,
+                    // so in theory we could just break, but I don't think that works well
+                    // if (for example) the clock changes. So we'll keep reading subsequent items.
                     continue;
                 }
             }
+
+            // We made it through the gauntlet.
+            let offset = line.as_ptr() as usize - self.full_contents.as_ptr() as usize;
+            return Some(offset);
         }
-
-        // We made it through the gauntlet.
-
-        /// # Safety
-        ///
-        /// Both `from` and `to` must be derived from the same slice.
-        unsafe fn offset(from: &[u8], to: &[u8]) -> usize {
-            let from = from.as_ptr();
-            let to = to.as_ptr();
-            // SAFETY: from and to are derived from the same slice, slices can't be longer than
-            // isize::MAX
-            let offset = unsafe { to.offset_from(from) };
-            offset.try_into().unwrap()
-        }
-
-        // Advance the cursor past the last line of this entry
-        *cursor = match lines.next() {
-            Some(next_line) => unsafe { offset(contents, next_line) },
-            None => contents.len(),
-        };
-
-        return Some(unsafe { offset(contents, line) });
+        None
     }
-
-    None
 }

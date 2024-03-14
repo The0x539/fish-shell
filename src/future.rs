@@ -66,3 +66,35 @@ impl<T> IsSorted for Vec<T> {
         IsSorted::is_sorted_by(&self.as_slice(), pred)
     }
 }
+
+pub trait TrimAscii {
+    fn trim_ascii_start(&self) -> &Self;
+    fn trim_ascii_end(&self) -> &Self;
+    fn trim_ascii(&self) -> &Self {
+        self.trim_ascii_start().trim_ascii_end()
+    }
+}
+impl TrimAscii for [u8] {
+    fn trim_ascii_start(&self) -> &Self {
+        let mut bytes = self;
+        while let [first, rest @ ..] = bytes {
+            if first.is_ascii_whitespace() {
+                bytes = rest;
+            } else {
+                break;
+            }
+        }
+        bytes
+    }
+    fn trim_ascii_end(&self) -> &Self {
+        let mut bytes = self;
+        while let [rest @ .., last] = bytes {
+            if last.is_ascii_whitespace() {
+                bytes = rest;
+            } else {
+                break;
+            }
+        }
+        bytes
+    }
+}
