@@ -518,9 +518,25 @@ macro_rules! implement_leaf {
     };
 }
 
+macro_rules! implement_parse_info {
+    ( $name:ident ) => {
+        implement_parse_info!($name, $name);
+    };
+
+    ( $name:ident, $variant:ident ) => {
+        implement_parse_info!($name, ParseInfo::$variant);
+    };
+
+    ( $name:ident, $value:expr ) => {
+        impl StaticParseInfo for $name {
+            const INFO: ParseInfo = $value;
+        }
+    };
+}
+
 /// Define a node that implements the keyword trait.
 macro_rules! define_keyword_node {
-    ( $name:ident, $($allowed:expr),* $(,)? ) => {
+    ( $name:ident, $($allowed:ident),* $(,)? ) => {
         #[derive(Default, Debug)]
         pub struct $name {
             parent: Option<*const dyn Node>,
@@ -553,7 +569,7 @@ macro_rules! define_keyword_node {
                 &mut self.keyword
             }
             fn allowed_keywords(&self) -> &'static [ParseKeyword] {
-                &[$($allowed),*]
+                &[$(ParseKeyword::$allowed),*]
             }
         }
     }
@@ -561,7 +577,7 @@ macro_rules! define_keyword_node {
 
 /// Define a node that implements the token trait.
 macro_rules! define_token_node {
-    ( $name:ident, $($allowed:expr),* $(,)? ) => {
+    ( $name:ident, $($allowed:ident),* $(,)? ) => {
         #[derive(Default, Debug)]
         pub struct $name {
             parent: Option<*const dyn Node>,
@@ -594,9 +610,13 @@ macro_rules! define_token_node {
                 &mut self.parse_token_type
             }
             fn allowed_tokens(&self) -> &'static [ParseTokenType] {
-                &[$($allowed),*]
+                Self::ALLOWED_TOKENS
             }
         }
+        impl StaticTokenInfo for $name {
+            const ALLOWED_TOKENS: &'static [ParseTokenType] = &[$(ParseTokenType::$allowed),*];
+        }
+        implement_parse_info!($name, ParseInfo::Token(Self::ALLOWED_TOKENS));
     }
 }
 
@@ -1071,6 +1091,7 @@ pub struct Redirection {
 }
 implement_node!(Redirection, branch, redirection);
 implement_acceptor_for_branch!(Redirection, (oper: TokenRedirection), (target: String_));
+implement_parse_info!(Redirection);
 impl ConcreteNode for Redirection {
     fn as_redirection(&self) -> Option<&Redirection> {
         Some(self)
@@ -1109,6 +1130,7 @@ implement_acceptor_for_branch!(
     ArgumentOrRedirection,
     (contents: (Box<ArgumentOrRedirectionVariant>))
 );
+implement_parse_info!(ArgumentOrRedirection);
 impl ConcreteNode for ArgumentOrRedirection {
     fn as_argument_or_redirection(&self) -> Option<&ArgumentOrRedirection> {
         Some(self)
@@ -1214,6 +1236,7 @@ implement_acceptor_for_branch!(
     (continuations: (JobConjunctionContinuationList)),
     (semi_nl: (Option<SemiNl>)),
 );
+implement_parse_info!(JobConjunction);
 impl ConcreteNode for JobConjunction {
     fn as_job_conjunction(&self) -> Option<&JobConjunction> {
         Some(self)
@@ -1414,6 +1437,7 @@ implement_acceptor_for_branch!(
     (kw_else: (KeywordElse)),
     (if_clause: (IfClause)),
 );
+implement_parse_info!(ElseifClause);
 impl ConcreteNode for ElseifClause {
     fn as_elseif_clause(&self) -> Option<&ElseifClause> {
         Some(self)
@@ -1452,6 +1476,7 @@ implement_acceptor_for_branch!(
     (semi_nl: (SemiNl)),
     (body: (JobList)),
 );
+implement_parse_info!(ElseClause);
 impl ConcreteNode for ElseClause {
     fn as_else_clause(&self) -> Option<&ElseClause> {
         Some(self)
@@ -1514,6 +1539,7 @@ implement_acceptor_for_branch!(
     (semi_nl: (SemiNl)),
     (body: (JobList)),
 );
+implement_parse_info!(CaseItem);
 impl ConcreteNode for CaseItem {
     fn as_case_item(&self) -> Option<&CaseItem> {
         Some(self)
@@ -1632,6 +1658,7 @@ implement_acceptor_for_branch!(
     (variables: (VariableAssignmentList)),
     (statement: (Statement)),
 );
+implement_parse_info!(JobContinuation);
 impl ConcreteNode for JobContinuation {
     fn as_job_continuation(&self) -> Option<&JobContinuation> {
         Some(self)
@@ -1675,6 +1702,7 @@ implement_acceptor_for_branch!(
     (newlines: (MaybeNewlines)),
     (job: (JobPipeline)),
 );
+implement_parse_info!(JobConjunctionContinuation);
 impl ConcreteNode for JobConjunctionContinuation {
     fn as_job_conjunction_continuation(&self) -> Option<&JobConjunctionContinuation> {
         Some(self)
@@ -1696,6 +1724,7 @@ pub struct AndorJob {
 }
 implement_node!(AndorJob, branch, andor_job);
 implement_acceptor_for_branch!(AndorJob, (job: (JobConjunction)));
+implement_parse_info!(AndorJob);
 impl ConcreteNode for AndorJob {
     fn as_andor_job(&self) -> Option<&AndorJob> {
         Some(self)
@@ -1803,6 +1832,7 @@ pub struct VariableAssignment {
 }
 implement_node!(VariableAssignment, leaf, variable_assignment);
 implement_leaf!(VariableAssignment);
+implement_parse_info!(VariableAssignment);
 impl ConcreteNode for VariableAssignment {
     fn as_leaf(&self) -> Option<&dyn Leaf> {
         Some(self)
@@ -1851,6 +1881,7 @@ pub struct Argument {
 }
 implement_node!(Argument, leaf, argument);
 implement_leaf!(Argument);
+implement_parse_info!(Argument);
 impl ConcreteNode for Argument {
     fn as_leaf(&self) -> Option<&dyn Leaf> {
         Some(self)
@@ -1868,32 +1899,33 @@ impl ConcreteNodeMut for Argument {
     }
 }
 
-define_token_node!(SemiNl, ParseTokenType::end);
-define_token_node!(String_, ParseTokenType::string);
-define_token_node!(TokenBackground, ParseTokenType::background);
-#[rustfmt::skip]
-define_token_node!(TokenConjunction, ParseTokenType::andand, ParseTokenType::oror);
-define_token_node!(TokenPipe, ParseTokenType::pipe);
-define_token_node!(TokenRedirection, ParseTokenType::redirection);
+define_token_node!(SemiNl, end);
+define_token_node!(String_, string);
+define_token_node!(TokenBackground, background);
+define_token_node!(TokenConjunction, andand, oror);
+define_token_node!(TokenPipe, pipe);
+define_token_node!(TokenRedirection, redirection);
+
+define_keyword_node!(DecoratedStatementDecorator, kw_command, kw_builtin, kw_exec);
+define_keyword_node!(JobConjunctionDecorator, kw_and, kw_or);
+define_keyword_node!(KeywordBegin, kw_begin);
+define_keyword_node!(KeywordCase, kw_case);
+define_keyword_node!(KeywordElse, kw_else);
+define_keyword_node!(KeywordEnd, kw_end);
+define_keyword_node!(KeywordFor, kw_for);
+define_keyword_node!(KeywordFunction, kw_function);
+define_keyword_node!(KeywordIf, kw_if);
+define_keyword_node!(KeywordIn, kw_in);
+define_keyword_node!(KeywordNot, kw_not, kw_builtin, kw_exclam);
+define_keyword_node!(KeywordSwitch, kw_switch);
+define_keyword_node!(KeywordTime, kw_time);
+define_keyword_node!(KeywordWhile, kw_while);
 
 #[rustfmt::skip]
-define_keyword_node!(DecoratedStatementDecorator, ParseKeyword::kw_command, ParseKeyword::kw_builtin, ParseKeyword::kw_exec);
+implement_parse_info!(JobConjunctionDecorator, ParseInfo::Keyword(KeywordParseInfo::Conjunction));
 #[rustfmt::skip]
-define_keyword_node!(JobConjunctionDecorator, ParseKeyword::kw_and, ParseKeyword::kw_or);
-#[rustfmt::skip]
-define_keyword_node!(KeywordBegin, ParseKeyword::kw_begin);
-define_keyword_node!(KeywordCase, ParseKeyword::kw_case);
-define_keyword_node!(KeywordElse, ParseKeyword::kw_else);
-define_keyword_node!(KeywordEnd, ParseKeyword::kw_end);
-define_keyword_node!(KeywordFor, ParseKeyword::kw_for);
-define_keyword_node!(KeywordFunction, ParseKeyword::kw_function);
-define_keyword_node!(KeywordIf, ParseKeyword::kw_if);
-define_keyword_node!(KeywordIn, ParseKeyword::kw_in);
-#[rustfmt::skip]
-define_keyword_node!(KeywordNot, ParseKeyword::kw_not, ParseKeyword::kw_builtin, ParseKeyword::kw_exclam);
-define_keyword_node!(KeywordSwitch, ParseKeyword::kw_switch);
-define_keyword_node!(KeywordTime, ParseKeyword::kw_time);
-define_keyword_node!(KeywordWhile, ParseKeyword::kw_while);
+implement_parse_info!(DecoratedStatementDecorator, ParseInfo::Keyword(KeywordParseInfo::Decorator));
+implement_parse_info!(KeywordTime, ParseInfo::Keyword(KeywordParseInfo::Time));
 
 impl DecoratedStatement {
     /// \return the decoration for this statement.
@@ -3297,9 +3329,9 @@ impl<'s> Populator<'s> {
     /// A true return means we should descend into the production, false means stop.
     /// Note that the argument is always nullptr and should be ignored. It is provided strictly
     /// for overloading purposes.
-    fn can_parse(&mut self, node: &dyn Node) -> bool {
-        match node.typ() {
-            Type::job_conjunction => {
+    fn can_parse<N: StaticParseInfo>(&mut self) -> bool {
+        match N::INFO {
+            ParseInfo::JobConjunction => {
                 let token = self.peek_token(0);
                 if token.typ != ParseTokenType::string {
                     return false;
@@ -3310,12 +3342,12 @@ impl<'s> Populator<'s> {
                     ParseKeyword::kw_end | ParseKeyword::kw_else | ParseKeyword::kw_case
                 )
             }
-            Type::argument => self.peek_type(0) == ParseTokenType::string,
-            Type::redirection => self.peek_type(0) == ParseTokenType::redirection,
-            Type::argument_or_redirection => {
+            ParseInfo::Argument => self.peek_type(0) == ParseTokenType::string,
+            ParseInfo::Redirection => self.peek_type(0) == ParseTokenType::redirection,
+            ParseInfo::ArgumentOrRedirection => {
                 [ParseTokenType::string, ParseTokenType::redirection].contains(&self.peek_type(0))
             }
-            Type::variable_assignment => {
+            ParseInfo::VariableAssignment => {
                 // Do we have a variable assignment at all?
                 if !self.peek_token(0).may_be_variable_assignment {
                     return false;
@@ -3339,48 +3371,50 @@ impl<'s> Populator<'s> {
                     }
                 }
             }
-            Type::token_base => node
-                .as_token()
-                .unwrap()
-                .allows_token(self.peek_token(0).typ),
 
-            // Note we have specific overloads for our keyword nodes, as they need custom logic.
-            Type::keyword_base => {
-                let keyword = node.as_keyword().unwrap();
-                match keyword.allowed_keywords() {
-                    // job conjunction decorator
-                    [ParseKeyword::kw_and, ParseKeyword::kw_or] => {
+            ParseInfo::Token(allowed) => allowed.contains(&self.peek_token(0).typ),
+
+            ParseInfo::Keyword(kw_info) => {
+                let kw = self.peek_token(0).keyword;
+                match kw_info {
+                    KeywordParseInfo::Conjunction => {
                         // This is for a job conjunction like `and stuff`
                         // But if it's `and --help` then we treat it as an ordinary command.
-                        keyword.allows_keyword(self.peek_token(0).keyword)
-                            && !self.peek_token(1).is_help_argument
+                        let (ParseKeyword::kw_and | ParseKeyword::kw_or) = kw else {
+                            return false;
+                        };
+                        !self.peek_token(1).is_help_argument
                     }
-                    // decorated statement decorator
-                    [ParseKeyword::kw_command, ParseKeyword::kw_builtin, ParseKeyword::kw_exec] => {
+                    KeywordParseInfo::Decorator => {
                         // Here the keyword is 'command' or 'builtin' or 'exec'.
                         // `command stuff` executes a command called stuff.
                         // `command -n` passes the -n argument to the 'command' builtin.
                         // `command` by itself is a command.
-                        if !keyword.allows_keyword(self.peek_token(0).keyword) {
+                        let (ParseKeyword::kw_command
+                        | ParseKeyword::kw_builtin
+                        | ParseKeyword::kw_exec) = kw
+                        else {
                             return false;
-                        }
+                        };
                         let tok1 = self.peek_token(1);
                         tok1.typ == ParseTokenType::string && !tok1.is_dash_prefix_string()
                     }
-                    [ParseKeyword::kw_time] => {
+                    KeywordParseInfo::Time => {
                         // Time keyword is only the time builtin if the next argument doesn't
                         // have a dash.
-                        keyword.allows_keyword(self.peek_token(0).keyword)
-                            && !self.peek_token(1).is_dash_prefix_string()
+                        let ParseKeyword::kw_time = kw else {
+                            return false;
+                        };
+                        !self.peek_token(1).is_dash_prefix_string()
                     }
-                    _ => panic!("Unexpected keyword in can_parse()"),
                 }
             }
-            Type::job_continuation => self.peek_type(0) == ParseTokenType::pipe,
-            Type::job_conjunction_continuation => {
+
+            ParseInfo::JobContinuation => self.peek_type(0) == ParseTokenType::pipe,
+            ParseInfo::JobConjunctionContinuation => {
                 [ParseTokenType::andand, ParseTokenType::oror].contains(&self.peek_type(0))
             }
-            Type::andor_job => {
+            ParseInfo::AndorJob => {
                 match self.peek_token(0).keyword {
                     ParseKeyword::kw_and | ParseKeyword::kw_or => {
                         // Check that the argument to and/or is a string that's not help. Otherwise
@@ -3391,13 +3425,12 @@ impl<'s> Populator<'s> {
                     _ => false,
                 }
             }
-            Type::elseif_clause => {
+            ParseInfo::ElseifClause => {
                 self.peek_token(0).keyword == ParseKeyword::kw_else
                     && self.peek_token(1).keyword == ParseKeyword::kw_if
             }
-            Type::else_clause => self.peek_token(0).keyword == ParseKeyword::kw_else,
-            Type::case_item => self.peek_token(0).keyword == ParseKeyword::kw_case,
-            _ => panic!("Unexpected token type in can_parse()"),
+            ParseInfo::ElseClause => self.peek_token(0).keyword == ParseKeyword::kw_else,
+            ParseInfo::CaseItem => self.peek_token(0).keyword == ParseKeyword::kw_case,
         }
     }
 
@@ -3406,7 +3439,7 @@ impl<'s> Populator<'s> {
     /// If exhaust_stream is set, then keep going until we get parse_token_type_t::terminate.
     fn populate_list<ListType: List>(&mut self, list: &mut ListType, exhaust_stream: bool)
     where
-        <ListType as List>::ContentsNode: NodeMut,
+        <ListType as List>::ContentsNode: StaticParseInfo,
     {
         assert!(list.contents().is_empty(), "List is not initially empty");
 
@@ -3665,10 +3698,8 @@ impl<'s> Populator<'s> {
         })
     }
 
-    fn try_parse<T: NodeMut + Default>(&mut self) -> Option<Box<T>> {
-        // TODO Optimize this.
-        let prototype = T::default();
-        if !self.can_parse(&prototype) {
+    fn try_parse<T: StaticParseInfo + Default>(&mut self) -> Option<Box<T>> {
+        if !self.can_parse::<T>() {
             return None;
         }
         Some(self.allocate_visit())
@@ -4039,4 +4070,34 @@ pub enum Type {
     argument,
     argument_list,
     job_list,
+}
+
+trait StaticParseInfo: NodeMut + Sized {
+    const INFO: ParseInfo;
+}
+
+trait StaticTokenInfo {
+    const ALLOWED_TOKENS: &'static [ParseTokenType];
+}
+
+enum ParseInfo {
+    JobConjunction,
+    Argument,
+    Redirection,
+    ArgumentOrRedirection,
+    VariableAssignment,
+    Token(&'static [ParseTokenType]),
+    Keyword(KeywordParseInfo),
+    JobContinuation,
+    JobConjunctionContinuation,
+    AndorJob,
+    ElseifClause,
+    ElseClause,
+    CaseItem,
+}
+
+enum KeywordParseInfo {
+    Conjunction,
+    Decorator,
+    Time,
 }
