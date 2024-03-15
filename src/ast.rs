@@ -446,6 +446,12 @@ pub trait List: Node {
     }
 }
 
+/// This is for optional values and for lists.
+trait CheckParse {
+    /// A true return means we should descend into the production, false means stop.
+    fn can_be_parsed(pop: &mut Populator<'_>) -> bool;
+}
+
 /// Implement the node trait.
 macro_rules! implement_node {
     (
@@ -514,22 +520,6 @@ macro_rules! implement_leaf {
         impl $name {
             /// Set the parent fields of all nodes in the tree rooted at \p self.
             fn set_parents(&mut self) {}
-        }
-    };
-}
-
-macro_rules! implement_parse_info {
-    ( $name:ident ) => {
-        implement_parse_info!($name, $name);
-    };
-
-    ( $name:ident, $variant:ident ) => {
-        implement_parse_info!($name, ParseInfo::$variant);
-    };
-
-    ( $name:ident, $value:expr ) => {
-        impl StaticParseInfo for $name {
-            const INFO: ParseInfo = $value;
         }
     };
 }
@@ -616,7 +606,12 @@ macro_rules! define_token_node {
         impl StaticTokenInfo for $name {
             const ALLOWED_TOKENS: &'static [ParseTokenType] = &[$(ParseTokenType::$allowed),*];
         }
-        implement_parse_info!($name, ParseInfo::Token(Self::ALLOWED_TOKENS));
+        impl CheckParse for $name {
+            fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
+                let typ = pop.peek_type(0);
+                Self::ALLOWED_TOKENS.contains(&typ)
+            }
+        }
     }
 }
 
@@ -1091,7 +1086,6 @@ pub struct Redirection {
 }
 implement_node!(Redirection, branch, redirection);
 implement_acceptor_for_branch!(Redirection, (oper: TokenRedirection), (target: String_));
-implement_parse_info!(Redirection);
 impl ConcreteNode for Redirection {
     fn as_redirection(&self) -> Option<&Redirection> {
         Some(self)
@@ -1100,6 +1094,11 @@ impl ConcreteNode for Redirection {
 impl ConcreteNodeMut for Redirection {
     fn as_mut_redirection(&mut self) -> Option<&mut Redirection> {
         Some(self)
+    }
+}
+impl CheckParse for Redirection {
+    fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
+        pop.peek_type(0) == ParseTokenType::redirection
     }
 }
 
@@ -1130,7 +1129,6 @@ implement_acceptor_for_branch!(
     ArgumentOrRedirection,
     (contents: (Box<ArgumentOrRedirectionVariant>))
 );
-implement_parse_info!(ArgumentOrRedirection);
 impl ConcreteNode for ArgumentOrRedirection {
     fn as_argument_or_redirection(&self) -> Option<&ArgumentOrRedirection> {
         Some(self)
@@ -1139,6 +1137,12 @@ impl ConcreteNode for ArgumentOrRedirection {
 impl ConcreteNodeMut for ArgumentOrRedirection {
     fn as_mut_argument_or_redirection(&mut self) -> Option<&mut ArgumentOrRedirection> {
         Some(self)
+    }
+}
+impl CheckParse for ArgumentOrRedirection {
+    fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
+        let typ = pop.peek_type(0);
+        matches!(typ, ParseTokenType::string | ParseTokenType::redirection)
     }
 }
 
@@ -1236,7 +1240,6 @@ implement_acceptor_for_branch!(
     (continuations: (JobConjunctionContinuationList)),
     (semi_nl: (Option<SemiNl>)),
 );
-implement_parse_info!(JobConjunction);
 impl ConcreteNode for JobConjunction {
     fn as_job_conjunction(&self) -> Option<&JobConjunction> {
         Some(self)
@@ -1245,6 +1248,17 @@ impl ConcreteNode for JobConjunction {
 impl ConcreteNodeMut for JobConjunction {
     fn as_mut_job_conjunction(&mut self) -> Option<&mut JobConjunction> {
         Some(self)
+    }
+}
+impl CheckParse for JobConjunction {
+    fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
+        let token = pop.peek_token(0);
+        // These keywords end a job list.
+        token.typ == ParseTokenType::string
+            && !matches!(
+                token.keyword,
+                ParseKeyword::kw_end | ParseKeyword::kw_else | ParseKeyword::kw_case
+            )
     }
 }
 
@@ -1437,7 +1451,6 @@ implement_acceptor_for_branch!(
     (kw_else: (KeywordElse)),
     (if_clause: (IfClause)),
 );
-implement_parse_info!(ElseifClause);
 impl ConcreteNode for ElseifClause {
     fn as_elseif_clause(&self) -> Option<&ElseifClause> {
         Some(self)
@@ -1446,6 +1459,12 @@ impl ConcreteNode for ElseifClause {
 impl ConcreteNodeMut for ElseifClause {
     fn as_mut_elseif_clause(&mut self) -> Option<&mut ElseifClause> {
         Some(self)
+    }
+}
+impl CheckParse for ElseifClause {
+    fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
+        pop.peek_token(0).keyword == ParseKeyword::kw_else
+            && pop.peek_token(1).keyword == ParseKeyword::kw_if
     }
 }
 
@@ -1476,7 +1495,6 @@ implement_acceptor_for_branch!(
     (semi_nl: (SemiNl)),
     (body: (JobList)),
 );
-implement_parse_info!(ElseClause);
 impl ConcreteNode for ElseClause {
     fn as_else_clause(&self) -> Option<&ElseClause> {
         Some(self)
@@ -1485,6 +1503,11 @@ impl ConcreteNode for ElseClause {
 impl ConcreteNodeMut for ElseClause {
     fn as_mut_else_clause(&mut self) -> Option<&mut ElseClause> {
         Some(self)
+    }
+}
+impl CheckParse for ElseClause {
+    fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
+        pop.peek_token(0).keyword == ParseKeyword::kw_else
     }
 }
 
@@ -1539,7 +1562,6 @@ implement_acceptor_for_branch!(
     (semi_nl: (SemiNl)),
     (body: (JobList)),
 );
-implement_parse_info!(CaseItem);
 impl ConcreteNode for CaseItem {
     fn as_case_item(&self) -> Option<&CaseItem> {
         Some(self)
@@ -1548,6 +1570,11 @@ impl ConcreteNode for CaseItem {
 impl ConcreteNodeMut for CaseItem {
     fn as_mut_case_item(&mut self) -> Option<&mut CaseItem> {
         Some(self)
+    }
+}
+impl CheckParse for CaseItem {
+    fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
+        pop.peek_token(0).keyword == ParseKeyword::kw_case
     }
 }
 
@@ -1658,7 +1685,6 @@ implement_acceptor_for_branch!(
     (variables: (VariableAssignmentList)),
     (statement: (Statement)),
 );
-implement_parse_info!(JobContinuation);
 impl ConcreteNode for JobContinuation {
     fn as_job_continuation(&self) -> Option<&JobContinuation> {
         Some(self)
@@ -1667,6 +1693,11 @@ impl ConcreteNode for JobContinuation {
 impl ConcreteNodeMut for JobContinuation {
     fn as_mut_job_continuation(&mut self) -> Option<&mut JobContinuation> {
         Some(self)
+    }
+}
+impl CheckParse for JobContinuation {
+    fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
+        pop.peek_type(0) == ParseTokenType::pipe
     }
 }
 
@@ -1702,7 +1733,6 @@ implement_acceptor_for_branch!(
     (newlines: (MaybeNewlines)),
     (job: (JobPipeline)),
 );
-implement_parse_info!(JobConjunctionContinuation);
 impl ConcreteNode for JobConjunctionContinuation {
     fn as_job_conjunction_continuation(&self) -> Option<&JobConjunctionContinuation> {
         Some(self)
@@ -1711,6 +1741,12 @@ impl ConcreteNode for JobConjunctionContinuation {
 impl ConcreteNodeMut for JobConjunctionContinuation {
     fn as_mut_job_conjunction_continuation(&mut self) -> Option<&mut JobConjunctionContinuation> {
         Some(self)
+    }
+}
+impl CheckParse for JobConjunctionContinuation {
+    fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
+        let typ = pop.peek_type(0);
+        matches!(typ, ParseTokenType::andand | ParseTokenType::oror)
     }
 }
 
@@ -1724,7 +1760,6 @@ pub struct AndorJob {
 }
 implement_node!(AndorJob, branch, andor_job);
 implement_acceptor_for_branch!(AndorJob, (job: (JobConjunction)));
-implement_parse_info!(AndorJob);
 impl ConcreteNode for AndorJob {
     fn as_andor_job(&self) -> Option<&AndorJob> {
         Some(self)
@@ -1733,6 +1768,18 @@ impl ConcreteNode for AndorJob {
 impl ConcreteNodeMut for AndorJob {
     fn as_mut_andor_job(&mut self) -> Option<&mut AndorJob> {
         Some(self)
+    }
+}
+impl CheckParse for AndorJob {
+    fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
+        let keyword = pop.peek_token(0).keyword;
+        if !matches!(keyword, ParseKeyword::kw_and | ParseKeyword::kw_or) {
+            return false;
+        }
+        // Check that the argument to and/or is a string that's not help. Otherwise
+        // it's either 'and --help' or a naked 'and', and not part of this list.
+        let next_token = pop.peek_token(1);
+        next_token.typ == ParseTokenType::string && !next_token.is_help_argument
     }
 }
 
@@ -1832,7 +1879,6 @@ pub struct VariableAssignment {
 }
 implement_node!(VariableAssignment, leaf, variable_assignment);
 implement_leaf!(VariableAssignment);
-implement_parse_info!(VariableAssignment);
 impl ConcreteNode for VariableAssignment {
     fn as_leaf(&self) -> Option<&dyn Leaf> {
         Some(self)
@@ -1844,6 +1890,32 @@ impl ConcreteNode for VariableAssignment {
 impl ConcreteNodeMut for VariableAssignment {
     fn as_mut_variable_assignment(&mut self) -> Option<&mut VariableAssignment> {
         Some(self)
+    }
+}
+impl CheckParse for VariableAssignment {
+    fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
+        // Do we have a variable assignment at all?
+        if !pop.peek_token(0).may_be_variable_assignment {
+            return false;
+        }
+        // What is the token after it?
+        match pop.peek_type(1) {
+            ParseTokenType::string => {
+                // We have `a= cmd` and should treat it as a variable assignment.
+                true
+            }
+            ParseTokenType::terminate => {
+                // We have `a=` which is OK if we are allowing incomplete, an error
+                // otherwise.
+                pop.allow_incomplete()
+            }
+            _ => {
+                // We have e.g. `a= >` which is an error.
+                // Note that we do not produce an error here. Instead we return false
+                // so this the token will be seen by allocate_populate_statement_contents.
+                false
+            }
+        }
     }
 }
 
@@ -1881,7 +1953,6 @@ pub struct Argument {
 }
 implement_node!(Argument, leaf, argument);
 implement_leaf!(Argument);
-implement_parse_info!(Argument);
 impl ConcreteNode for Argument {
     fn as_leaf(&self) -> Option<&dyn Leaf> {
         Some(self)
@@ -1896,6 +1967,11 @@ impl ConcreteNodeMut for Argument {
     }
     fn as_mut_argument(&mut self) -> Option<&mut Argument> {
         Some(self)
+    }
+}
+impl CheckParse for Argument {
+    fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
+        pop.peek_type(0) == ParseTokenType::string
     }
 }
 
@@ -1921,9 +1997,46 @@ define_keyword_node!(KeywordSwitch, kw_switch);
 define_keyword_node!(KeywordTime, kw_time);
 define_keyword_node!(KeywordWhile, kw_while);
 
-implement_parse_info!(JobConjunctionDecorator);
-implement_parse_info!(DecoratedStatementDecorator);
-implement_parse_info!(KeywordTime);
+impl CheckParse for JobConjunctionDecorator {
+    fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
+        // This is for a job conjunction like `and stuff`
+        // But if it's `and --help` then we treat it as an ordinary command.
+        let keyword = pop.peek_token(0).keyword;
+        if !matches!(keyword, ParseKeyword::kw_and | ParseKeyword::kw_or) {
+            return false;
+        }
+        !pop.peek_token(1).is_help_argument
+    }
+}
+
+impl CheckParse for DecoratedStatementDecorator {
+    fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
+        // Here the keyword is 'command' or 'builtin' or 'exec'.
+        // `command stuff` executes a command called stuff.
+        // `command -n` passes the -n argument to the 'command' builtin.
+        // `command` by itself is a command.
+        let keyword = pop.peek_token(0).keyword;
+        if !matches!(
+            keyword,
+            ParseKeyword::kw_command | ParseKeyword::kw_builtin | ParseKeyword::kw_exec
+        ) {
+            return false;
+        }
+        let next_token = pop.peek_token(1);
+        next_token.typ == ParseTokenType::string && !next_token.is_dash_prefix_string()
+    }
+}
+
+impl CheckParse for KeywordTime {
+    fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
+        // Time keyword is only the time builtin if the next argument doesn't have a dash.
+        let keyword = pop.peek_token(0).keyword;
+        if !matches!(keyword, ParseKeyword::kw_time) {
+            return false;
+        }
+        !pop.peek_token(1).is_dash_prefix_string()
+    }
+}
 
 impl DecoratedStatement {
     /// \return the decoration for this statement.
@@ -3323,105 +3436,12 @@ impl<'s> Populator<'s> {
         }
     }
 
-    /// This is for optional values and for lists.
-    /// A true return means we should descend into the production, false means stop.
-    /// Note that the argument is always nullptr and should be ignored. It is provided strictly
-    /// for overloading purposes.
-    fn can_parse<N: StaticParseInfo>(&mut self) -> bool {
-        use ParseKeyword as Kw;
-        use ParseTokenType as Tok;
-
-        let token = self.peek_token(0);
-        match N::INFO {
-            ParseInfo::JobConjunction => {
-                token.typ == Tok::string
-                    // These end a job list.
-                    && !matches!(token.keyword, Kw::kw_end | Kw::kw_else | Kw::kw_case)
-            }
-            ParseInfo::Argument => token.typ == Tok::string,
-            ParseInfo::Redirection => token.typ == Tok::redirection,
-            ParseInfo::ArgumentOrRedirection => matches!(token.typ, Tok::string | Tok::redirection),
-            ParseInfo::VariableAssignment => {
-                // Do we have a variable assignment at all?
-                if !token.may_be_variable_assignment {
-                    return false;
-                }
-                // What is the token after it?
-                match self.peek_type(1) {
-                    Tok::string => {
-                        // We have `a= cmd` and should treat it as a variable assignment.
-                        true
-                    }
-                    Tok::terminate => {
-                        // We have `a=` which is OK if we are allowing incomplete, an error
-                        // otherwise.
-                        self.allow_incomplete()
-                    }
-                    _ => {
-                        // We have e.g. `a= >` which is an error.
-                        // Note that we do not produce an error here. Instead we return false
-                        // so this the token will be seen by allocate_populate_statement_contents.
-                        false
-                    }
-                }
-            }
-
-            ParseInfo::Token(allowed) => allowed.contains(&token.typ),
-
-            ParseInfo::JobConjunctionDecorator => {
-                // This is for a job conjunction like `and stuff`
-                // But if it's `and --help` then we treat it as an ordinary command.
-                if !matches!(token.keyword, ParseKeyword::kw_and | ParseKeyword::kw_or) {
-                    return false;
-                }
-                !self.peek_token(1).is_help_argument
-            }
-
-            ParseInfo::DecoratedStatementDecorator => {
-                // Here the keyword is 'command' or 'builtin' or 'exec'.
-                // `command stuff` executes a command called stuff.
-                // `command -n` passes the -n argument to the 'command' builtin.
-                // `command` by itself is a command.
-                if !matches!(token.keyword, Kw::kw_command | Kw::kw_builtin | Kw::kw_exec) {
-                    return false;
-                }
-                let next_token = self.peek_token(1);
-                next_token.typ == Tok::string && !next_token.is_dash_prefix_string()
-            }
-
-            ParseInfo::KeywordTime => {
-                if !matches!(token.keyword, Kw::kw_time) {
-                    return false;
-                }
-                // Time keyword is only the time builtin if the next argument doesn't have a dash.
-                !self.peek_token(1).is_dash_prefix_string()
-            }
-
-            ParseInfo::JobContinuation => token.typ == Tok::pipe,
-            ParseInfo::JobConjunctionContinuation => matches!(token.typ, Tok::andand | Tok::oror),
-            ParseInfo::AndorJob => {
-                if !matches!(token.keyword, Kw::kw_and | Kw::kw_or) {
-                    return false;
-                }
-                // Check that the argument to and/or is a string that's not help. Otherwise
-                // it's either 'and --help' or a naked 'and', and not part of this list.
-                let next_token = self.peek_token(1);
-                next_token.typ == Tok::string && !next_token.is_help_argument
-            }
-            ParseInfo::ElseifClause => {
-                token.keyword == Kw::kw_else && self.peek_token(1).keyword == Kw::kw_if
-            }
-            ParseInfo::ElseClause => token.keyword == Kw::kw_else,
-            ParseInfo::CaseItem => token.keyword == Kw::kw_case,
-        }
-    }
-
     /// Given that we are a list of type ListNodeType, whose contents type is ContentsNode,
     /// populate as many elements as we can.
     /// If exhaust_stream is set, then keep going until we get parse_token_type_t::terminate.
     fn populate_list<ListType: List>(&mut self, list: &mut ListType, exhaust_stream: bool)
     where
-        <ListType as List>::ContentsNode: StaticParseInfo,
+        <ListType as List>::ContentsNode: NodeMut + CheckParse,
     {
         assert!(list.contents().is_empty(), "List is not initially empty");
 
@@ -3680,8 +3700,8 @@ impl<'s> Populator<'s> {
         })
     }
 
-    fn try_parse<T: StaticParseInfo + Default>(&mut self) -> Option<Box<T>> {
-        if !self.can_parse::<T>() {
+    fn try_parse<T: NodeMut + Default + CheckParse>(&mut self) -> Option<Box<T>> {
+        if !T::can_be_parsed(self) {
             return None;
         }
         Some(self.allocate_visit())
@@ -4054,28 +4074,6 @@ pub enum Type {
     job_list,
 }
 
-trait StaticParseInfo: NodeMut + Sized {
-    const INFO: ParseInfo;
-}
-
 trait StaticTokenInfo {
     const ALLOWED_TOKENS: &'static [ParseTokenType];
-}
-
-enum ParseInfo {
-    JobConjunction,
-    Argument,
-    Redirection,
-    ArgumentOrRedirection,
-    VariableAssignment,
-    Token(&'static [ParseTokenType]),
-    JobConjunctionDecorator,
-    DecoratedStatementDecorator,
-    KeywordTime,
-    JobContinuation,
-    JobConjunctionContinuation,
-    AndorJob,
-    ElseifClause,
-    ElseClause,
-    CaseItem,
 }
