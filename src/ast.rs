@@ -452,6 +452,10 @@ trait CheckParse {
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool;
 }
 
+trait StaticTokenInfo {
+    const ALLOWED_TOKENS: &'static [ParseTokenType];
+}
+
 /// Implement the node trait.
 macro_rules! implement_node {
     (
@@ -1900,21 +1904,14 @@ impl CheckParse for VariableAssignment {
         }
         // What is the token after it?
         match pop.peek_type(1) {
-            ParseTokenType::string => {
-                // We have `a= cmd` and should treat it as a variable assignment.
-                true
-            }
-            ParseTokenType::terminate => {
-                // We have `a=` which is OK if we are allowing incomplete, an error
-                // otherwise.
-                pop.allow_incomplete()
-            }
-            _ => {
-                // We have e.g. `a= >` which is an error.
-                // Note that we do not produce an error here. Instead we return false
-                // so this the token will be seen by allocate_populate_statement_contents.
-                false
-            }
+            // We have `a= cmd` and should treat it as a variable assignment.
+            ParseTokenType::string => true,
+            // We have `a=` which is OK if we are allowing incomplete, an error otherwise.
+            ParseTokenType::terminate => pop.allow_incomplete(),
+            // We have e.g. `a= >` which is an error.
+            // Note that we do not produce an error here. Instead we return false
+            // so this the token will be seen by allocate_populate_statement_contents.
+            _ => false,
         }
     }
 }
@@ -4072,8 +4069,4 @@ pub enum Type {
     argument,
     argument_list,
     job_list,
-}
-
-trait StaticTokenInfo {
-    const ALLOWED_TOKENS: &'static [ParseTokenType];
 }
