@@ -126,240 +126,115 @@ pub trait Node: Acceptor + ConcreteNode + std::fmt::Debug {
 /// NodeMut is a mutable node.
 trait NodeMut: Node + AcceptorMut + ConcreteNodeMut {}
 
-pub trait ConcreteNode {
-    // Cast to any sub-trait.
-    fn as_leaf(&self) -> Option<&dyn Leaf> {
-        None
-    }
-    fn as_keyword(&self) -> Option<&dyn Keyword> {
-        None
-    }
-    fn as_token(&self) -> Option<&dyn Token> {
-        None
-    }
+macro_rules! downcast {
+    ( & $( $func:ident : $concrete:ty, )* ) => {
+        $(
+            fn $func(&self) -> Option<&$concrete> {
+                None
+            }
+        )*
+    };
+    ( &mut $( $func:ident : $concrete:ty, )* ) => {
+        $(
+            fn $func(&mut self) -> Option<&mut $concrete> {
+                None
+            }
+        )*
+    };
+}
 
-    // Cast to any node type.
-    fn as_redirection(&self) -> Option<&Redirection> {
-        None
-    }
-    fn as_variable_assignment(&self) -> Option<&VariableAssignment> {
-        None
-    }
-    fn as_variable_assignment_list(&self) -> Option<&VariableAssignmentList> {
-        None
-    }
-    fn as_argument_or_redirection(&self) -> Option<&ArgumentOrRedirection> {
-        None
-    }
-    fn as_argument_or_redirection_list(&self) -> Option<&ArgumentOrRedirectionList> {
-        None
-    }
-    fn as_statement(&self) -> Option<&Statement> {
-        None
-    }
-    fn as_job_pipeline(&self) -> Option<&JobPipeline> {
-        None
-    }
-    fn as_job_conjunction(&self) -> Option<&JobConjunction> {
-        None
-    }
-    fn as_for_header(&self) -> Option<&ForHeader> {
-        None
-    }
-    fn as_while_header(&self) -> Option<&WhileHeader> {
-        None
-    }
-    fn as_function_header(&self) -> Option<&FunctionHeader> {
-        None
-    }
-    fn as_begin_header(&self) -> Option<&BeginHeader> {
-        None
-    }
-    fn as_block_statement(&self) -> Option<&BlockStatement> {
-        None
-    }
-    fn as_if_clause(&self) -> Option<&IfClause> {
-        None
-    }
-    fn as_elseif_clause(&self) -> Option<&ElseifClause> {
-        None
-    }
-    fn as_elseif_clause_list(&self) -> Option<&ElseifClauseList> {
-        None
-    }
-    fn as_else_clause(&self) -> Option<&ElseClause> {
-        None
-    }
-    fn as_if_statement(&self) -> Option<&IfStatement> {
-        None
-    }
-    fn as_case_item(&self) -> Option<&CaseItem> {
-        None
-    }
-    fn as_switch_statement(&self) -> Option<&SwitchStatement> {
-        None
-    }
-    fn as_decorated_statement(&self) -> Option<&DecoratedStatement> {
-        None
-    }
-    fn as_not_statement(&self) -> Option<&NotStatement> {
-        None
-    }
-    fn as_job_continuation(&self) -> Option<&JobContinuation> {
-        None
-    }
-    fn as_job_continuation_list(&self) -> Option<&JobContinuationList> {
-        None
-    }
-    fn as_job_conjunction_continuation(&self) -> Option<&JobConjunctionContinuation> {
-        None
-    }
-    fn as_andor_job(&self) -> Option<&AndorJob> {
-        None
-    }
-    fn as_andor_job_list(&self) -> Option<&AndorJobList> {
-        None
-    }
-    fn as_freestanding_argument_list(&self) -> Option<&FreestandingArgumentList> {
-        None
-    }
-    fn as_job_conjunction_continuation_list(&self) -> Option<&JobConjunctionContinuationList> {
-        None
-    }
-    fn as_maybe_newlines(&self) -> Option<&MaybeNewlines> {
-        None
-    }
-    fn as_case_item_list(&self) -> Option<&CaseItemList> {
-        None
-    }
-    fn as_argument(&self) -> Option<&Argument> {
-        None
-    }
-    fn as_argument_list(&self) -> Option<&ArgumentList> {
-        None
-    }
-    fn as_job_list(&self) -> Option<&JobList> {
-        None
+pub trait ConcreteNode {
+    downcast! {
+        &
+
+        // Cast to any sub-trait.
+        as_leaf: dyn Leaf,
+        as_keyword: dyn Keyword,
+        as_token: dyn Token,
+
+        // Cast to any node type.
+        as_redirection: Redirection,
+        as_variable_assignment: VariableAssignment,
+        as_variable_assignment_list: VariableAssignmentList,
+        as_argument_or_redirection: ArgumentOrRedirection,
+        as_argument_or_redirection_list: ArgumentOrRedirectionList,
+        as_statement: Statement,
+        as_job_pipeline: JobPipeline,
+        as_job_conjunction: JobConjunction,
+        as_for_header: ForHeader,
+        as_while_header: WhileHeader,
+        as_function_header: FunctionHeader,
+        as_begin_header: BeginHeader,
+        as_block_statement: BlockStatement,
+        as_if_clause: IfClause,
+        as_elseif_clause: ElseifClause,
+        as_elseif_clause_list: ElseifClauseList,
+        as_else_clause: ElseClause,
+        as_if_statement: IfStatement,
+        as_case_item: CaseItem,
+        as_switch_statement: SwitchStatement,
+        as_decorated_statement: DecoratedStatement,
+        as_not_statement: NotStatement,
+        as_job_continuation: JobContinuation,
+        as_job_continuation_list: JobContinuationList,
+        as_job_conjunction_continuation: JobConjunctionContinuation,
+        as_andor_job: AndorJob,
+        as_andor_job_list: AndorJobList,
+        as_freestanding_argument_list: FreestandingArgumentList,
+        as_job_conjunction_continuation_list: JobConjunctionContinuationList,
+        as_maybe_newlines: MaybeNewlines,
+        as_case_item_list: CaseItemList,
+        as_argument: Argument,
+        as_argument_list: ArgumentList,
+        as_job_list: JobList,
     }
 }
 
 #[allow(unused)]
 trait ConcreteNodeMut {
-    // Cast to any sub-trait.
-    fn as_mut_leaf(&mut self) -> Option<&mut dyn Leaf> {
-        None
-    }
-    fn as_mut_keyword(&mut self) -> Option<&mut dyn Keyword> {
-        None
-    }
-    fn as_mut_token(&mut self) -> Option<&mut dyn Token> {
-        None
-    }
+    downcast! {
+        &mut
 
-    // Cast to any node type.
-    fn as_mut_redirection(&mut self) -> Option<&mut Redirection> {
-        None
-    }
-    fn as_mut_variable_assignment(&mut self) -> Option<&mut VariableAssignment> {
-        None
-    }
-    fn as_mut_variable_assignment_list(&mut self) -> Option<&mut VariableAssignmentList> {
-        None
-    }
-    fn as_mut_argument_or_redirection(&mut self) -> Option<&mut ArgumentOrRedirection> {
-        None
-    }
-    fn as_mut_argument_or_redirection_list(&mut self) -> Option<&mut ArgumentOrRedirectionList> {
-        None
-    }
-    fn as_mut_statement(&mut self) -> Option<&mut Statement> {
-        None
-    }
-    fn as_mut_job_pipeline(&mut self) -> Option<&mut JobPipeline> {
-        None
-    }
-    fn as_mut_job_conjunction(&mut self) -> Option<&mut JobConjunction> {
-        None
-    }
-    fn as_mut_for_header(&mut self) -> Option<&mut ForHeader> {
-        None
-    }
-    fn as_mut_while_header(&mut self) -> Option<&mut WhileHeader> {
-        None
-    }
-    fn as_mut_function_header(&mut self) -> Option<&mut FunctionHeader> {
-        None
-    }
-    fn as_mut_begin_header(&mut self) -> Option<&mut BeginHeader> {
-        None
-    }
-    fn as_mut_block_statement(&mut self) -> Option<&mut BlockStatement> {
-        None
-    }
-    fn as_mut_if_clause(&mut self) -> Option<&mut IfClause> {
-        None
-    }
-    fn as_mut_elseif_clause(&mut self) -> Option<&mut ElseifClause> {
-        None
-    }
-    fn as_mut_elseif_clause_list(&mut self) -> Option<&mut ElseifClauseList> {
-        None
-    }
-    fn as_mut_else_clause(&mut self) -> Option<&mut ElseClause> {
-        None
-    }
-    fn as_mut_if_statement(&mut self) -> Option<&mut IfStatement> {
-        None
-    }
-    fn as_mut_case_item(&mut self) -> Option<&mut CaseItem> {
-        None
-    }
-    fn as_mut_switch_statement(&mut self) -> Option<&mut SwitchStatement> {
-        None
-    }
-    fn as_mut_decorated_statement(&mut self) -> Option<&mut DecoratedStatement> {
-        None
-    }
-    fn as_mut_not_statement(&mut self) -> Option<&mut NotStatement> {
-        None
-    }
-    fn as_mut_job_continuation(&mut self) -> Option<&mut JobContinuation> {
-        None
-    }
-    fn as_mut_job_continuation_list(&mut self) -> Option<&mut JobContinuationList> {
-        None
-    }
-    fn as_mut_job_conjunction_continuation(&mut self) -> Option<&mut JobConjunctionContinuation> {
-        None
-    }
-    fn as_mut_andor_job(&mut self) -> Option<&mut AndorJob> {
-        None
-    }
-    fn as_mut_andor_job_list(&mut self) -> Option<&mut AndorJobList> {
-        None
-    }
-    fn as_mut_freestanding_argument_list(&mut self) -> Option<&mut FreestandingArgumentList> {
-        None
-    }
-    fn as_mut_job_conjunction_continuation_list(
-        &mut self,
-    ) -> Option<&mut JobConjunctionContinuationList> {
-        None
-    }
-    fn as_mut_maybe_newlines(&mut self) -> Option<&mut MaybeNewlines> {
-        None
-    }
-    fn as_mut_case_item_list(&mut self) -> Option<&mut CaseItemList> {
-        None
-    }
-    fn as_mut_argument(&mut self) -> Option<&mut Argument> {
-        None
-    }
-    fn as_mut_argument_list(&mut self) -> Option<&mut ArgumentList> {
-        None
-    }
-    fn as_mut_job_list(&mut self) -> Option<&mut JobList> {
-        None
+        // Cast to any sub-trait.
+        as_mut_leaf: dyn Leaf,
+        as_mut_keyword: dyn Keyword,
+        as_mut_token: dyn Token,
+
+        // Cast to any node type.
+        as_mut_redirection: Redirection,
+        as_mut_variable_assignment: VariableAssignment,
+        as_mut_variable_assignment_list: VariableAssignmentList,
+        as_mut_argument_or_redirection: ArgumentOrRedirection,
+        as_mut_argument_or_redirection_list: ArgumentOrRedirectionList,
+        as_mut_statement: Statement,
+        as_mut_job_pipeline: JobPipeline,
+        as_mut_job_conjunction: JobConjunction,
+        as_mut_for_header: ForHeader,
+        as_mut_while_header: WhileHeader,
+        as_mut_function_header: FunctionHeader,
+        as_mut_begin_header: BeginHeader,
+        as_mut_block_statement: BlockStatement,
+        as_mut_if_clause: IfClause,
+        as_mut_elseif_clause: ElseifClause,
+        as_mut_elseif_clause_list: ElseifClauseList,
+        as_mut_else_clause: ElseClause,
+        as_mut_if_statement: IfStatement,
+        as_mut_case_item: CaseItem,
+        as_mut_switch_statement: SwitchStatement,
+        as_mut_decorated_statement: DecoratedStatement,
+        as_mut_not_statement: NotStatement,
+        as_mut_job_continuation: JobContinuation,
+        as_mut_job_continuation_list: JobContinuationList,
+        as_mut_job_conjunction_continuation: JobConjunctionContinuation,
+        as_mut_andor_job: AndorJob,
+        as_mut_andor_job_list: AndorJobList,
+        as_mut_freestanding_argument_list: FreestandingArgumentList,
+        as_mut_job_conjunction_continuation_list: JobConjunctionContinuationList,
+        as_mut_maybe_newlines: MaybeNewlines,
+        as_mut_case_item_list: CaseItemList,
+        as_mut_argument: Argument,
+        as_mut_argument_list: ArgumentList,
+        as_mut_job_list: JobList,
     }
 }
 
