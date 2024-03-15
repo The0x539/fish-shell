@@ -58,39 +58,12 @@ pub struct MissingEndError {
 
 pub type VisitResult = ControlFlow<MissingEndError>;
 
-trait NodeVisitorMut {
-    /// will_visit (did_visit) is called before (after) a node's fields are visited.
-    fn will_visit_fields_of(&mut self, node: &mut dyn NodeMut);
-    fn visit_mut(&mut self, node: &mut dyn NodeMut) -> VisitResult;
-    fn did_visit_fields_of<'a>(&'a mut self, node: &'a dyn NodeMut, flow: VisitResult);
-
-    fn visit_argument_or_redirection(
-        &mut self,
-        _node: &mut Box<ArgumentOrRedirectionVariant>,
-    ) -> VisitResult;
-    fn visit_block_statement_header(
-        &mut self,
-        _node: &mut Box<BlockStatementHeaderVariant>,
-    ) -> VisitResult;
-    fn visit_statement(&mut self, _node: &mut Box<StatementVariant>) -> VisitResult;
-
-    fn visit_decorated_statement_decorator(
-        &mut self,
-        _node: &mut Option<DecoratedStatementDecorator>,
-    );
-    fn visit_job_conjunction_decorator(&mut self, _node: &mut Option<JobConjunctionDecorator>);
-    fn visit_else_clause(&mut self, _node: &mut Option<ElseClause>);
-    fn visit_semi_nl(&mut self, _node: &mut Option<SemiNl>);
-    fn visit_time(&mut self, _node: &mut Option<KeywordTime>);
-    fn visit_token_background(&mut self, _node: &mut Option<TokenBackground>);
-}
-
 trait AcceptorMut {
-    fn accept_mut(&mut self, visitor: &mut dyn NodeVisitorMut, reversed: bool);
+    fn accept_mut(&mut self, visitor: &mut Populator<'_>, reversed: bool);
 }
 
 impl<T: AcceptorMut> AcceptorMut for Option<T> {
-    fn accept_mut(&mut self, visitor: &mut dyn NodeVisitorMut, reversed: bool) {
+    fn accept_mut(&mut self, visitor: &mut Populator<'_>, reversed: bool) {
         match self {
             Some(node) => node.accept_mut(visitor, reversed),
             None => (),
@@ -537,7 +510,7 @@ macro_rules! implement_leaf {
         }
         impl AcceptorMut for $name {
             #[allow(unused_variables)]
-            fn accept_mut(&mut self, visitor: &mut dyn NodeVisitorMut, reversed: bool) {
+            fn accept_mut(&mut self, visitor: &mut Populator<'_>, reversed: bool) {
                 visitor.will_visit_fields_of(self);
                 visitor.did_visit_fields_of(self, VisitResult::Continue(()));
             }
@@ -708,7 +681,7 @@ macro_rules! define_list_node {
         }
         impl AcceptorMut for $name {
             #[allow(unused_variables)]
-            fn accept_mut(&mut self, visitor: &mut dyn NodeVisitorMut, reversed: bool) {
+            fn accept_mut(&mut self, visitor: &mut Populator<'_>, reversed: bool) {
                 visitor.will_visit_fields_of(self);
                 let flow = accept_list_visitor!(
                     Self, accept_mut, visit_mut, self, visitor, reversed, $contents
@@ -802,7 +775,7 @@ macro_rules! implement_acceptor_for_branch {
         }
         impl AcceptorMut for $name {
             #[allow(unused_variables)]
-            fn accept_mut(&mut self, visitor: &mut dyn NodeVisitorMut, reversed: bool) {
+            fn accept_mut(&mut self, visitor: &mut Populator<'_>, reversed: bool) {
                 visitor.will_visit_fields_of(self);
                 let flow = visitor_accept_field!(
                                 Self,
@@ -1834,7 +1807,7 @@ impl Acceptor for ArgumentOrRedirectionVariant {
     }
 }
 impl AcceptorMut for ArgumentOrRedirectionVariant {
-    fn accept_mut(&mut self, visitor: &mut dyn NodeVisitorMut, reversed: bool) {
+    fn accept_mut(&mut self, visitor: &mut Populator<'_>, reversed: bool) {
         match self {
             ArgumentOrRedirectionVariant::Argument(child) => child.accept_mut(visitor, reversed),
             ArgumentOrRedirectionVariant::Redirection(child) => child.accept_mut(visitor, reversed),
@@ -1929,7 +1902,7 @@ impl Acceptor for StatementVariant {
     }
 }
 impl AcceptorMut for StatementVariant {
-    fn accept_mut(&mut self, visitor: &mut dyn NodeVisitorMut, reversed: bool) {
+    fn accept_mut(&mut self, visitor: &mut Populator<'_>, reversed: bool) {
         match self {
             StatementVariant::None => panic!("cannot visit null statement"),
             StatementVariant::NotStatement(node) => node.accept_mut(visitor, reversed),
@@ -2045,7 +2018,7 @@ impl Acceptor for BlockStatementHeaderVariant {
     }
 }
 impl AcceptorMut for BlockStatementHeaderVariant {
-    fn accept_mut(&mut self, visitor: &mut dyn NodeVisitorMut, reversed: bool) {
+    fn accept_mut(&mut self, visitor: &mut Populator<'_>, reversed: bool) {
         match self {
             BlockStatementHeaderVariant::None => panic!("cannot visit null block header"),
             BlockStatementHeaderVariant::ForHeader(node) => node.accept_mut(visitor, reversed),
@@ -2595,7 +2568,9 @@ struct Populator<'a> {
     out_errors: Option<&'a mut ParseErrorList>,
 }
 
-impl<'s> NodeVisitorMut for Populator<'s> {
+impl<'s> Populator<'s> {
+    /// will_visit (did_visit) is called before (after) a node's fields are visited.
+
     fn visit_mut(&mut self, node: &mut dyn NodeMut) -> VisitResult {
         match node.typ() {
             Type::argument => {
