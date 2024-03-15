@@ -25,6 +25,7 @@ use crate::tokenizer::{
 };
 use crate::wchar::prelude::*;
 use std::ops::{ControlFlow, Index, IndexMut};
+use std::ptr::NonNull;
 
 /**
  * A NodeVisitor is something which can visit an AST node.
@@ -456,6 +457,8 @@ trait StaticTokenInfo {
     const ALLOWED_TOKENS: &'static [ParseTokenType];
 }
 
+type ParentRef = Option<NonNull<dyn Node>>;
+
 /// Implement the node trait.
 macro_rules! implement_node {
     (
@@ -470,7 +473,7 @@ macro_rules! implement_node {
                 Type::$type
             }
             fn parent(&self) -> Option<&dyn Node> {
-                self.parent.map(|p| unsafe { &*p })
+                self.parent.map(|p| unsafe { p.as_ref() })
             }
             fn category(&self) -> Category {
                 Category::$category
@@ -569,7 +572,7 @@ macro_rules! define_keyword_node {
     ( $name:ident, $($allowed:ident),* $(,)? ) => {
         #[derive(Default, Debug)]
         pub struct $name {
-            parent: Option<*const dyn Node>,
+            parent: ParentRef,
             range: Option<SourceRange>,
             keyword: ParseKeyword,
         }
@@ -610,7 +613,7 @@ macro_rules! define_token_node {
     ( $name:ident, $($allowed:ident),* $(,)? ) => {
         #[derive(Default, Debug)]
         pub struct $name {
-            parent: Option<*const dyn Node>,
+            parent: ParentRef,
             range: Option<SourceRange>,
             parse_token_type: ParseTokenType,
         }
@@ -666,7 +669,7 @@ macro_rules! define_list_node {
     ) => {
         #[derive(Default, Debug)]
         pub struct $name {
-            parent: Option<*const dyn Node>,
+            parent: ParentRef,
             list_contents: Vec<Box<$contents>>,
         }
         implement_node!($name, list, $type $(, $downcast, $downcast_mut)?);
@@ -717,7 +720,7 @@ macro_rules! define_list_node {
             /// Set the parent fields of all nodes in the tree rooted at \p self.
             fn set_parents(&mut self) {
                 for i in 0..self.count() {
-                    self[i].parent = Some(self);
+                    self[i].parent = Some(NonNull::from(&*self));
                     self[i].set_parents();
                 }
             }
@@ -1024,7 +1027,7 @@ macro_rules! set_parent_of_field {
         $field_name:ident,
         (Box<$field_type:ident>)
     ) => {
-        $self.$field_name.set_union_parent($self);
+        $self.$field_name.set_union_parent(NonNull::from(&*$self));
     };
     (
         $self:ident,
@@ -1032,7 +1035,7 @@ macro_rules! set_parent_of_field {
         (Option<$field_type:ident>)
     ) => {
         if $self.$field_name.is_some() {
-            $self.$field_name.as_mut().unwrap().parent = Some($self);
+            $self.$field_name.as_mut().unwrap().parent = Some(NonNull::from(&*$self));
             $self.$field_name.as_mut().unwrap().set_parents();
         }
     };
@@ -1041,7 +1044,7 @@ macro_rules! set_parent_of_field {
         $field_name:ident,
         $field_type:tt
     ) => {
-        $self.$field_name.parent = Some($self);
+        $self.$field_name.parent = Some(NonNull::from(&*$self));
         $self.$field_name.set_parents();
     };
 }
@@ -1050,7 +1053,7 @@ macro_rules! set_parent_of_field {
 /// Note that pipes are not redirections.
 #[derive(Default, Debug)]
 pub struct Redirection {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     pub oper: TokenRedirection,
     pub target: String_,
 }
@@ -1079,7 +1082,7 @@ define_list_node!(
 /// An argument or redirection holds either an argument or redirection.
 #[derive(Default, Debug)]
 pub struct ArgumentOrRedirection {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     pub contents: Box<ArgumentOrRedirectionVariant>,
 }
 implement_node!(
@@ -1111,7 +1114,7 @@ define_list_node!(
 /// A statement is a normal command, or an if / while / etc
 #[derive(Default, Debug)]
 pub struct Statement {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     pub contents: Box<StatementVariant>,
 }
 implement_node!(Statement, branch, statement, as_statement, as_mut_statement);
@@ -1121,7 +1124,7 @@ implement_acceptor_for_branch!(Statement, (contents: (Box<StatementVariant>)));
 /// like if statements, where we require a command).
 #[derive(Default, Debug)]
 pub struct JobPipeline {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     /// Maybe the time keyword.
     pub time: Option<KeywordTime>,
     /// A (possibly empty) list of variable assignments.
@@ -1152,7 +1155,7 @@ implement_acceptor_for_branch!(
 /// A job_conjunction is a job followed by a && or || continuations.
 #[derive(Default, Debug)]
 pub struct JobConjunction {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     /// The job conjunction decorator.
     pub decorator: Option<JobConjunctionDecorator>,
     /// The job itself.
@@ -1192,7 +1195,7 @@ impl CheckParse for JobConjunction {
 
 #[derive(Default, Debug)]
 pub struct ForHeader {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     /// 'for'
     pub kw_for: KeywordFor,
     /// var_name
@@ -1222,7 +1225,7 @@ implement_acceptor_for_branch!(
 
 #[derive(Default, Debug)]
 pub struct WhileHeader {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     /// 'while'
     pub kw_while: KeywordWhile,
     pub condition: JobConjunction,
@@ -1244,7 +1247,7 @@ implement_acceptor_for_branch!(
 
 #[derive(Default, Debug)]
 pub struct FunctionHeader {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     pub kw_function: KeywordFunction,
     /// functions require at least one argument.
     pub first_arg: Argument,
@@ -1268,7 +1271,7 @@ implement_acceptor_for_branch!(
 
 #[derive(Default, Debug)]
 pub struct BeginHeader {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     pub kw_begin: KeywordBegin,
     /// Note that 'begin' does NOT require a semi or nl afterwards.
     /// This is valid: begin echo hi; end
@@ -1289,7 +1292,7 @@ implement_acceptor_for_branch!(
 
 #[derive(Default, Debug)]
 pub struct BlockStatement {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     /// A header like for, while, etc.
     pub header: Box<BlockStatementHeaderVariant>,
     /// List of jobs in this block.
@@ -1316,7 +1319,7 @@ implement_acceptor_for_branch!(
 
 #[derive(Default, Debug)]
 pub struct IfClause {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     /// The 'if' keyword.
     pub kw_if: KeywordIf,
     /// The 'if' condition.
@@ -1337,7 +1340,7 @@ implement_acceptor_for_branch!(
 
 #[derive(Default, Debug)]
 pub struct ElseifClause {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     /// The 'else' keyword.
     pub kw_else: KeywordElse,
     /// The 'if' clause following it.
@@ -1372,7 +1375,7 @@ define_list_node!(
 
 #[derive(Default, Debug)]
 pub struct ElseClause {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     /// else ; body
     pub kw_else: KeywordElse,
     pub semi_nl: SemiNl,
@@ -1399,7 +1402,7 @@ impl CheckParse for ElseClause {
 
 #[derive(Default, Debug)]
 pub struct IfStatement {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     /// if part
     pub if_clause: IfClause,
     /// else if list
@@ -1429,7 +1432,7 @@ implement_acceptor_for_branch!(
 
 #[derive(Default, Debug)]
 pub struct CaseItem {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     /// case <arguments> ; body
     pub kw_case: KeywordCase,
     pub arguments: ArgumentList,
@@ -1452,7 +1455,7 @@ impl CheckParse for CaseItem {
 
 #[derive(Default, Debug)]
 pub struct SwitchStatement {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     /// switch <argument> ; body ; end args_redirs
     pub kw_switch: KeywordSwitch,
     pub argument: Argument,
@@ -1482,7 +1485,7 @@ implement_acceptor_for_branch!(
 /// "builtin" or "command" or "exec"
 #[derive(Default, Debug)]
 pub struct DecoratedStatement {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     /// An optional decoration (command, builtin, exec, etc).
     pub opt_decoration: Option<DecoratedStatementDecorator>,
     /// Command to run.
@@ -1507,7 +1510,7 @@ implement_acceptor_for_branch!(
 /// A not statement like `not true` or `! true`
 #[derive(Default, Debug)]
 pub struct NotStatement {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     /// Keyword, either not or exclam.
     pub kw: KeywordNot,
     pub variables: VariableAssignmentList,
@@ -1531,7 +1534,7 @@ implement_acceptor_for_branch!(
 
 #[derive(Default, Debug)]
 pub struct JobContinuation {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     pub pipe: TokenPipe,
     pub newlines: MaybeNewlines,
     pub variables: VariableAssignmentList,
@@ -1567,7 +1570,7 @@ define_list_node!(
 
 #[derive(Default, Debug)]
 pub struct JobConjunctionContinuation {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     /// The && or || token.
     pub conjunction: TokenConjunction,
     pub newlines: MaybeNewlines,
@@ -1599,7 +1602,7 @@ impl CheckParse for JobConjunctionContinuation {
 /// instances of this.
 #[derive(Default, Debug)]
 pub struct AndorJob {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     pub job: JobConjunction,
 }
 implement_node!(AndorJob, branch, andor_job, as_andor_job, as_mut_andor_job);
@@ -1630,7 +1633,7 @@ define_list_node!(
 /// In practice the tok_ends are ignored by fish code so we do not bother to store them.
 #[derive(Default, Debug)]
 pub struct FreestandingArgumentList {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     pub arguments: ArgumentList,
 }
 implement_node!(
@@ -1678,7 +1681,7 @@ define_list_node!(
 /// A variable_assignment contains a source range like FOO=bar.
 #[derive(Default, Debug)]
 pub struct VariableAssignment {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     range: Option<SourceRange>,
 }
 implement_node!(VariableAssignment, leaf, variable_assignment);
@@ -1710,7 +1713,7 @@ impl CheckParse for VariableAssignment {
 /// Zero or more newlines.
 #[derive(Default, Debug)]
 pub struct MaybeNewlines {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     range: Option<SourceRange>,
 }
 implement_node!(MaybeNewlines, leaf, maybe_newlines);
@@ -1720,7 +1723,7 @@ implement_leaf!(MaybeNewlines, as_maybe_newlines, as_mut_maybe_newlines);
 /// This is a separate type because it is sometimes useful to find all arguments.
 #[derive(Default, Debug)]
 pub struct Argument {
-    parent: Option<*const dyn Node>,
+    parent: ParentRef,
     range: Option<SourceRange>,
 }
 implement_node!(Argument, leaf, argument);
@@ -1854,7 +1857,7 @@ impl ArgumentOrRedirectionVariant {
         }
     }
 
-    fn set_union_parent(&mut self, parent: *const dyn Node) {
+    fn set_union_parent(&mut self, parent: NonNull<dyn Node>) {
         match self {
             ArgumentOrRedirectionVariant::Argument(x) => {
                 x.parent = Some(parent);
@@ -1988,7 +1991,7 @@ impl StatementVariant {
         }
     }
 
-    fn set_union_parent(&mut self, parent: *const dyn Node) {
+    fn set_union_parent(&mut self, parent: NonNull<dyn Node>) {
         match self {
             StatementVariant::NotStatement(x) => {
                 x.parent = Some(parent);
@@ -2096,7 +2099,7 @@ impl BlockStatementHeaderVariant {
         }
     }
 
-    fn set_union_parent(&mut self, parent: *const dyn Node) {
+    fn set_union_parent(&mut self, parent: NonNull<dyn Node>) {
         match self {
             BlockStatementHeaderVariant::ForHeader(x) => {
                 x.parent = Some(parent);
