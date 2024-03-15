@@ -1921,11 +1921,9 @@ define_keyword_node!(KeywordSwitch, kw_switch);
 define_keyword_node!(KeywordTime, kw_time);
 define_keyword_node!(KeywordWhile, kw_while);
 
-#[rustfmt::skip]
-implement_parse_info!(JobConjunctionDecorator, ParseInfo::Keyword(KeywordParseInfo::Conjunction));
-#[rustfmt::skip]
-implement_parse_info!(DecoratedStatementDecorator, ParseInfo::Keyword(KeywordParseInfo::Decorator));
-implement_parse_info!(KeywordTime, ParseInfo::Keyword(KeywordParseInfo::Time));
+implement_parse_info!(JobConjunctionDecorator);
+implement_parse_info!(DecoratedStatementDecorator);
+implement_parse_info!(KeywordTime);
 
 impl DecoratedStatement {
     /// \return the decoration for this statement.
@@ -3330,35 +3328,31 @@ impl<'s> Populator<'s> {
     /// Note that the argument is always nullptr and should be ignored. It is provided strictly
     /// for overloading purposes.
     fn can_parse<N: StaticParseInfo>(&mut self) -> bool {
+        use ParseKeyword as Kw;
+        use ParseTokenType as Tok;
+
+        let token = self.peek_token(0);
         match N::INFO {
             ParseInfo::JobConjunction => {
-                let token = self.peek_token(0);
-                if token.typ != ParseTokenType::string {
-                    return false;
-                }
-                !matches!(
-                    token.keyword,
+                token.typ == Tok::string
                     // These end a job list.
-                    ParseKeyword::kw_end | ParseKeyword::kw_else | ParseKeyword::kw_case
-                )
+                    && !matches!(token.keyword, Kw::kw_end | Kw::kw_else | Kw::kw_case)
             }
-            ParseInfo::Argument => self.peek_type(0) == ParseTokenType::string,
-            ParseInfo::Redirection => self.peek_type(0) == ParseTokenType::redirection,
-            ParseInfo::ArgumentOrRedirection => {
-                [ParseTokenType::string, ParseTokenType::redirection].contains(&self.peek_type(0))
-            }
+            ParseInfo::Argument => token.typ == Tok::string,
+            ParseInfo::Redirection => token.typ == Tok::redirection,
+            ParseInfo::ArgumentOrRedirection => matches!(token.typ, Tok::string | Tok::redirection),
             ParseInfo::VariableAssignment => {
                 // Do we have a variable assignment at all?
-                if !self.peek_token(0).may_be_variable_assignment {
+                if !token.may_be_variable_assignment {
                     return false;
                 }
                 // What is the token after it?
                 match self.peek_type(1) {
-                    ParseTokenType::string => {
+                    Tok::string => {
                         // We have `a= cmd` and should treat it as a variable assignment.
                         true
                     }
-                    ParseTokenType::terminate => {
+                    Tok::terminate => {
                         // We have `a=` which is OK if we are allowing incomplete, an error
                         // otherwise.
                         self.allow_incomplete()
@@ -3372,65 +3366,53 @@ impl<'s> Populator<'s> {
                 }
             }
 
-            ParseInfo::Token(allowed) => allowed.contains(&self.peek_token(0).typ),
+            ParseInfo::Token(allowed) => allowed.contains(&token.typ),
 
-            ParseInfo::Keyword(kw_info) => {
-                let kw = self.peek_token(0).keyword;
-                match kw_info {
-                    KeywordParseInfo::Conjunction => {
-                        // This is for a job conjunction like `and stuff`
-                        // But if it's `and --help` then we treat it as an ordinary command.
-                        let (ParseKeyword::kw_and | ParseKeyword::kw_or) = kw else {
-                            return false;
-                        };
-                        !self.peek_token(1).is_help_argument
-                    }
-                    KeywordParseInfo::Decorator => {
-                        // Here the keyword is 'command' or 'builtin' or 'exec'.
-                        // `command stuff` executes a command called stuff.
-                        // `command -n` passes the -n argument to the 'command' builtin.
-                        // `command` by itself is a command.
-                        let (ParseKeyword::kw_command
-                        | ParseKeyword::kw_builtin
-                        | ParseKeyword::kw_exec) = kw
-                        else {
-                            return false;
-                        };
-                        let tok1 = self.peek_token(1);
-                        tok1.typ == ParseTokenType::string && !tok1.is_dash_prefix_string()
-                    }
-                    KeywordParseInfo::Time => {
-                        // Time keyword is only the time builtin if the next argument doesn't
-                        // have a dash.
-                        let ParseKeyword::kw_time = kw else {
-                            return false;
-                        };
-                        !self.peek_token(1).is_dash_prefix_string()
-                    }
+            ParseInfo::JobConjunctionDecorator => {
+                // This is for a job conjunction like `and stuff`
+                // But if it's `and --help` then we treat it as an ordinary command.
+                if !matches!(token.keyword, ParseKeyword::kw_and | ParseKeyword::kw_or) {
+                    return false;
                 }
+                !self.peek_token(1).is_help_argument
             }
 
-            ParseInfo::JobContinuation => self.peek_type(0) == ParseTokenType::pipe,
-            ParseInfo::JobConjunctionContinuation => {
-                [ParseTokenType::andand, ParseTokenType::oror].contains(&self.peek_type(0))
+            ParseInfo::DecoratedStatementDecorator => {
+                // Here the keyword is 'command' or 'builtin' or 'exec'.
+                // `command stuff` executes a command called stuff.
+                // `command -n` passes the -n argument to the 'command' builtin.
+                // `command` by itself is a command.
+                if !matches!(token.keyword, Kw::kw_command | Kw::kw_builtin | Kw::kw_exec) {
+                    return false;
+                }
+                let next_token = self.peek_token(1);
+                next_token.typ == Tok::string && !next_token.is_dash_prefix_string()
             }
+
+            ParseInfo::KeywordTime => {
+                if !matches!(token.keyword, Kw::kw_time) {
+                    return false;
+                }
+                // Time keyword is only the time builtin if the next argument doesn't have a dash.
+                !self.peek_token(1).is_dash_prefix_string()
+            }
+
+            ParseInfo::JobContinuation => token.typ == Tok::pipe,
+            ParseInfo::JobConjunctionContinuation => matches!(token.typ, Tok::andand | Tok::oror),
             ParseInfo::AndorJob => {
-                match self.peek_token(0).keyword {
-                    ParseKeyword::kw_and | ParseKeyword::kw_or => {
-                        // Check that the argument to and/or is a string that's not help. Otherwise
-                        // it's either 'and --help' or a naked 'and', and not part of this list.
-                        let nexttok = self.peek_token(1);
-                        nexttok.typ == ParseTokenType::string && !nexttok.is_help_argument
-                    }
-                    _ => false,
+                if !matches!(token.keyword, Kw::kw_and | Kw::kw_or) {
+                    return false;
                 }
+                // Check that the argument to and/or is a string that's not help. Otherwise
+                // it's either 'and --help' or a naked 'and', and not part of this list.
+                let next_token = self.peek_token(1);
+                next_token.typ == Tok::string && !next_token.is_help_argument
             }
             ParseInfo::ElseifClause => {
-                self.peek_token(0).keyword == ParseKeyword::kw_else
-                    && self.peek_token(1).keyword == ParseKeyword::kw_if
+                token.keyword == Kw::kw_else && self.peek_token(1).keyword == Kw::kw_if
             }
-            ParseInfo::ElseClause => self.peek_token(0).keyword == ParseKeyword::kw_else,
-            ParseInfo::CaseItem => self.peek_token(0).keyword == ParseKeyword::kw_case,
+            ParseInfo::ElseClause => token.keyword == Kw::kw_else,
+            ParseInfo::CaseItem => token.keyword == Kw::kw_case,
         }
     }
 
@@ -4087,17 +4069,13 @@ enum ParseInfo {
     ArgumentOrRedirection,
     VariableAssignment,
     Token(&'static [ParseTokenType]),
-    Keyword(KeywordParseInfo),
+    JobConjunctionDecorator,
+    DecoratedStatementDecorator,
+    KeywordTime,
     JobContinuation,
     JobConjunctionContinuation,
     AndorJob,
     ElseifClause,
     ElseClause,
     CaseItem,
-}
-
-enum KeywordParseInfo {
-    Conjunction,
-    Decorator,
-    Time,
 }
