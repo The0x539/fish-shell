@@ -130,242 +130,130 @@ pub trait Node: Acceptor + ConcreteNode + std::fmt::Debug {
 #[enum_dispatch]
 trait NodeMut: Node + AcceptorMut + ConcreteNodeMut {}
 
-#[enum_dispatch]
-pub trait ConcreteNode {
-    // Cast to any sub-trait.
-    fn as_leaf(&self) -> Option<&dyn Leaf> {
-        None
-    }
-    fn as_keyword(&self) -> Option<&dyn Keyword> {
-        None
-    }
-    fn as_token(&self) -> Option<&dyn Token> {
-        None
-    }
+macro_rules! downcast {
+    (
+        $ConcreteNode:ident
+        $ConcreteNodeMut:ident
+        $( @dyn $category:ty, )+
+        $( $node:ty, )+
+    ) => {
+        paste::paste! {
+            #[enum_dispatch]
+            pub trait $ConcreteNode {
+                $( fn [< as_ $category:snake >] (&self) -> Option<&dyn $category> { None } )+
+                $( fn [< as_ $node:snake >] (&self) -> Option<&$node> { None } )+
+            }
 
-    // Cast to any node type.
-    fn as_redirection(&self) -> Option<&Redirection> {
-        None
-    }
-    fn as_variable_assignment(&self) -> Option<&VariableAssignment> {
-        None
-    }
-    fn as_variable_assignment_list(&self) -> Option<&VariableAssignmentList> {
-        None
-    }
-    fn as_argument_or_redirection(&self) -> Option<&ArgumentOrRedirection> {
-        None
-    }
-    fn as_argument_or_redirection_list(&self) -> Option<&ArgumentOrRedirectionList> {
-        None
-    }
-    fn as_statement(&self) -> Option<&Statement> {
-        None
-    }
-    fn as_job_pipeline(&self) -> Option<&JobPipeline> {
-        None
-    }
-    fn as_job_conjunction(&self) -> Option<&JobConjunction> {
-        None
-    }
-    fn as_for_header(&self) -> Option<&ForHeader> {
-        None
-    }
-    fn as_while_header(&self) -> Option<&WhileHeader> {
-        None
-    }
-    fn as_function_header(&self) -> Option<&FunctionHeader> {
-        None
-    }
-    fn as_begin_header(&self) -> Option<&BeginHeader> {
-        None
-    }
-    fn as_block_statement(&self) -> Option<&BlockStatement> {
-        None
-    }
-    fn as_if_clause(&self) -> Option<&IfClause> {
-        None
-    }
-    fn as_elseif_clause(&self) -> Option<&ElseifClause> {
-        None
-    }
-    fn as_elseif_clause_list(&self) -> Option<&ElseifClauseList> {
-        None
-    }
-    fn as_else_clause(&self) -> Option<&ElseClause> {
-        None
-    }
-    fn as_if_statement(&self) -> Option<&IfStatement> {
-        None
-    }
-    fn as_case_item(&self) -> Option<&CaseItem> {
-        None
-    }
-    fn as_switch_statement(&self) -> Option<&SwitchStatement> {
-        None
-    }
-    fn as_decorated_statement(&self) -> Option<&DecoratedStatement> {
-        None
-    }
-    fn as_not_statement(&self) -> Option<&NotStatement> {
-        None
-    }
-    fn as_job_continuation(&self) -> Option<&JobContinuation> {
-        None
-    }
-    fn as_job_continuation_list(&self) -> Option<&JobContinuationList> {
-        None
-    }
-    fn as_job_conjunction_continuation(&self) -> Option<&JobConjunctionContinuation> {
-        None
-    }
-    fn as_andor_job(&self) -> Option<&AndorJob> {
-        None
-    }
-    fn as_andor_job_list(&self) -> Option<&AndorJobList> {
-        None
-    }
-    fn as_freestanding_argument_list(&self) -> Option<&FreestandingArgumentList> {
-        None
-    }
-    fn as_job_conjunction_continuation_list(&self) -> Option<&JobConjunctionContinuationList> {
-        None
-    }
-    fn as_maybe_newlines(&self) -> Option<&MaybeNewlines> {
-        None
-    }
-    fn as_case_item_list(&self) -> Option<&CaseItemList> {
-        None
-    }
-    fn as_argument(&self) -> Option<&Argument> {
-        None
-    }
-    fn as_argument_list(&self) -> Option<&ArgumentList> {
-        None
-    }
-    fn as_job_list(&self) -> Option<&JobList> {
-        None
+            #[enum_dispatch]
+            pub trait $ConcreteNodeMut {
+                $( fn [< as_mut_ $category:snake >] (&mut self) -> Option<&mut dyn $category> { None } )+
+                $( fn [< as_mut_ $node:snake >] (&mut self) -> Option<&mut $node> { None } )+
+            }
+
+            impl<T: $ConcreteNode> $ConcreteNode for &T {
+                $(
+                    fn [< as_ $category:snake >] (&self) -> Option<&dyn $category> {
+                        T::[< as_ $category:snake >](self)
+                    }
+                )+
+                $(
+                    fn [< as_ $node:snake >] (&self) -> Option<&$node> {
+                        T::[< as_ $node:snake >](self)
+                    }
+                )+
+            }
+
+            impl<T: $ConcreteNodeMut> $ConcreteNodeMut for &mut T {
+                $(
+                    fn [< as_mut_ $category:snake >] (&mut self) -> Option<&mut dyn $category> {
+                        T::[< as_mut_ $category:snake >](self)
+                    }
+                )+
+                $(
+                    fn [< as_mut_ $node:snake >] (&mut self) -> Option<&mut $node> {
+                        T::[< as_mut_ $node:snake >](self)
+                    }
+                )+
+            }
+        }
     }
 }
 
-#[allow(unused)]
-#[enum_dispatch]
-trait ConcreteNodeMut {
+downcast! {
+    ConcreteNode
+    ConcreteNodeMut
+
     // Cast to any sub-trait.
-    fn as_mut_leaf(&mut self) -> Option<&mut dyn Leaf> {
-        None
-    }
-    fn as_mut_keyword(&mut self) -> Option<&mut dyn Keyword> {
-        None
-    }
-    fn as_mut_token(&mut self) -> Option<&mut dyn Token> {
-        None
-    }
+    @dyn Leaf,
+    @dyn Keyword,
+    @dyn Token,
 
     // Cast to any node type.
-    fn as_mut_redirection(&mut self) -> Option<&mut Redirection> {
-        None
+    Redirection,
+    VariableAssignment,
+    VariableAssignmentList,
+    ArgumentOrRedirection,
+    ArgumentOrRedirectionList,
+    Statement,
+    JobPipeline,
+    JobConjunction,
+    ForHeader,
+    WhileHeader,
+    FunctionHeader,
+    BeginHeader,
+    BlockStatement,
+    IfClause,
+    ElseifClause,
+    ElseifClauseList,
+    ElseClause,
+    IfStatement,
+    CaseItem,
+    SwitchStatement,
+    DecoratedStatement,
+    NotStatement,
+    JobContinuation,
+    JobContinuationList,
+    JobConjunctionContinuation,
+    AndorJob,
+    AndorJobList,
+    FreestandingArgumentList,
+    JobConjunctionContinuationList,
+    MaybeNewlines,
+    CaseItemList,
+    Argument,
+    ArgumentList,
+    JobList,
+}
+
+impl<T: Acceptor> Acceptor for &T {
+    fn accept<'a>(&'a self, visitor: &mut dyn NodeVisitor<'a>, reversed: bool) {
+        T::accept(self, visitor, reversed)
     }
-    fn as_mut_variable_assignment(&mut self) -> Option<&mut VariableAssignment> {
-        None
+}
+
+impl<T: Node> Node for &T {
+    fn parent(&self) -> Option<&dyn Node> {
+        T::parent(self)
     }
-    fn as_mut_variable_assignment_list(&mut self) -> Option<&mut VariableAssignmentList> {
-        None
+
+    fn typ(&self) -> Type {
+        T::typ(self)
     }
-    fn as_mut_argument_or_redirection(&mut self) -> Option<&mut ArgumentOrRedirection> {
-        None
+
+    fn category(&self) -> Category {
+        T::category(self)
     }
-    fn as_mut_argument_or_redirection_list(&mut self) -> Option<&mut ArgumentOrRedirectionList> {
-        None
+
+    fn try_source_range(&self) -> Option<SourceRange> {
+        T::try_source_range(self)
     }
-    fn as_mut_statement(&mut self) -> Option<&mut Statement> {
-        None
+
+    fn as_ptr(&self) -> *const () {
+        T::as_ptr(self)
     }
-    fn as_mut_job_pipeline(&mut self) -> Option<&mut JobPipeline> {
-        None
-    }
-    fn as_mut_job_conjunction(&mut self) -> Option<&mut JobConjunction> {
-        None
-    }
-    fn as_mut_for_header(&mut self) -> Option<&mut ForHeader> {
-        None
-    }
-    fn as_mut_while_header(&mut self) -> Option<&mut WhileHeader> {
-        None
-    }
-    fn as_mut_function_header(&mut self) -> Option<&mut FunctionHeader> {
-        None
-    }
-    fn as_mut_begin_header(&mut self) -> Option<&mut BeginHeader> {
-        None
-    }
-    fn as_mut_block_statement(&mut self) -> Option<&mut BlockStatement> {
-        None
-    }
-    fn as_mut_if_clause(&mut self) -> Option<&mut IfClause> {
-        None
-    }
-    fn as_mut_elseif_clause(&mut self) -> Option<&mut ElseifClause> {
-        None
-    }
-    fn as_mut_elseif_clause_list(&mut self) -> Option<&mut ElseifClauseList> {
-        None
-    }
-    fn as_mut_else_clause(&mut self) -> Option<&mut ElseClause> {
-        None
-    }
-    fn as_mut_if_statement(&mut self) -> Option<&mut IfStatement> {
-        None
-    }
-    fn as_mut_case_item(&mut self) -> Option<&mut CaseItem> {
-        None
-    }
-    fn as_mut_switch_statement(&mut self) -> Option<&mut SwitchStatement> {
-        None
-    }
-    fn as_mut_decorated_statement(&mut self) -> Option<&mut DecoratedStatement> {
-        None
-    }
-    fn as_mut_not_statement(&mut self) -> Option<&mut NotStatement> {
-        None
-    }
-    fn as_mut_job_continuation(&mut self) -> Option<&mut JobContinuation> {
-        None
-    }
-    fn as_mut_job_continuation_list(&mut self) -> Option<&mut JobContinuationList> {
-        None
-    }
-    fn as_mut_job_conjunction_continuation(&mut self) -> Option<&mut JobConjunctionContinuation> {
-        None
-    }
-    fn as_mut_andor_job(&mut self) -> Option<&mut AndorJob> {
-        None
-    }
-    fn as_mut_andor_job_list(&mut self) -> Option<&mut AndorJobList> {
-        None
-    }
-    fn as_mut_freestanding_argument_list(&mut self) -> Option<&mut FreestandingArgumentList> {
-        None
-    }
-    fn as_mut_job_conjunction_continuation_list(
-        &mut self,
-    ) -> Option<&mut JobConjunctionContinuationList> {
-        None
-    }
-    fn as_mut_maybe_newlines(&mut self) -> Option<&mut MaybeNewlines> {
-        None
-    }
-    fn as_mut_case_item_list(&mut self) -> Option<&mut CaseItemList> {
-        None
-    }
-    fn as_mut_argument(&mut self) -> Option<&mut Argument> {
-        None
-    }
-    fn as_mut_argument_list(&mut self) -> Option<&mut ArgumentList> {
-        None
-    }
-    fn as_mut_job_list(&mut self) -> Option<&mut JobList> {
-        None
+
+    fn as_node(&self) -> &dyn Node {
+        T::as_node(self)
     }
 }
 
