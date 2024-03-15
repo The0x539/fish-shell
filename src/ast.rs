@@ -986,7 +986,7 @@ macro_rules! set_parent_of_field {
         $field_name:ident,
         (Box<$field_type:ident>)
     ) => {
-        set_parent_of_union_field!($self, $field_name, $field_type);
+        $self.$field_name.set_union_parent($self);
     };
     (
         $self:ident,
@@ -1005,78 +1005,6 @@ macro_rules! set_parent_of_field {
     ) => {
         $self.$field_name.parent = Some($self);
         $self.$field_name.set_parents();
-    };
-}
-
-macro_rules! set_parent_of_union_field {
-    (
-        $self:ident,
-        $field_name:ident,
-        ArgumentOrRedirectionVariant
-    ) => {
-        if matches!(
-            *$self.$field_name,
-            ArgumentOrRedirectionVariant::Argument(_)
-        ) {
-            $self.$field_name.as_mut_argument().parent = Some($self);
-            $self.$field_name.as_mut_argument().set_parents();
-        } else {
-            $self.$field_name.as_mut_redirection().parent = Some($self);
-            $self.$field_name.as_mut_redirection().set_parents();
-        }
-    };
-    (
-        $self:ident,
-        $field_name:ident,
-        StatementVariant
-    ) => {
-        if matches!(*$self.$field_name, StatementVariant::NotStatement(_)) {
-            $self.$field_name.as_mut_not_statement().parent = Some($self);
-            $self.$field_name.as_mut_not_statement().set_parents();
-        } else if matches!(*$self.$field_name, StatementVariant::BlockStatement(_)) {
-            $self.$field_name.as_mut_block_statement().parent = Some($self);
-            $self.$field_name.as_mut_block_statement().set_parents();
-        } else if matches!(*$self.$field_name, StatementVariant::IfStatement(_)) {
-            $self.$field_name.as_mut_if_statement().parent = Some($self);
-            $self.$field_name.as_mut_if_statement().set_parents();
-        } else if matches!(*$self.$field_name, StatementVariant::SwitchStatement(_)) {
-            $self.$field_name.as_mut_switch_statement().parent = Some($self);
-            $self.$field_name.as_mut_switch_statement().set_parents();
-        } else if matches!(*$self.$field_name, StatementVariant::DecoratedStatement(_)) {
-            $self.$field_name.as_mut_decorated_statement().parent = Some($self);
-            $self.$field_name.as_mut_decorated_statement().set_parents();
-        }
-    };
-    (
-        $self:ident,
-        $field_name:ident,
-        BlockStatementHeaderVariant
-    ) => {
-        if matches!(
-            *$self.$field_name,
-            BlockStatementHeaderVariant::ForHeader(_)
-        ) {
-            $self.$field_name.as_mut_for_header().parent = Some($self);
-            $self.$field_name.as_mut_for_header().set_parents();
-        } else if matches!(
-            *$self.$field_name,
-            BlockStatementHeaderVariant::WhileHeader(_)
-        ) {
-            $self.$field_name.as_mut_while_header().parent = Some($self);
-            $self.$field_name.as_mut_while_header().set_parents();
-        } else if matches!(
-            *$self.$field_name,
-            BlockStatementHeaderVariant::FunctionHeader(_)
-        ) {
-            $self.$field_name.as_mut_function_header().parent = Some($self);
-            $self.$field_name.as_mut_function_header().set_parents();
-        } else if matches!(
-            *$self.$field_name,
-            BlockStatementHeaderVariant::BeginHeader(_)
-        ) {
-            $self.$field_name.as_mut_begin_header().parent = Some($self);
-            $self.$field_name.as_mut_begin_header().set_parents();
-        }
     };
 }
 
@@ -2094,16 +2022,17 @@ impl ArgumentOrRedirectionVariant {
             ArgumentOrRedirectionVariant::Redirection(node) => node,
         }
     }
-    fn as_mut_argument(&mut self) -> &mut Argument {
+
+    fn set_union_parent(&mut self, parent: *const dyn Node) {
         match self {
-            ArgumentOrRedirectionVariant::Argument(node) => node,
-            _ => panic!(),
-        }
-    }
-    fn as_mut_redirection(&mut self) -> &mut Redirection {
-        match self {
-            ArgumentOrRedirectionVariant::Redirection(redirection) => redirection,
-            _ => panic!(),
+            ArgumentOrRedirectionVariant::Argument(x) => {
+                x.parent = Some(parent);
+                x.set_parents();
+            }
+            ArgumentOrRedirectionVariant::Redirection(x) => {
+                x.parent = Some(parent);
+                x.set_parents();
+            }
         }
     }
 }
@@ -2227,34 +2156,30 @@ impl StatementVariant {
             StatementVariant::DecoratedStatement(node) => node,
         }
     }
-    fn as_mut_not_statement(&mut self) -> &mut NotStatement {
+
+    fn set_union_parent(&mut self, parent: *const dyn Node) {
         match self {
-            StatementVariant::NotStatement(node) => node,
-            _ => panic!(),
-        }
-    }
-    fn as_mut_block_statement(&mut self) -> &mut BlockStatement {
-        match self {
-            StatementVariant::BlockStatement(node) => node,
-            _ => panic!(),
-        }
-    }
-    fn as_mut_if_statement(&mut self) -> &mut IfStatement {
-        match self {
-            StatementVariant::IfStatement(node) => node,
-            _ => panic!(),
-        }
-    }
-    fn as_mut_switch_statement(&mut self) -> &mut SwitchStatement {
-        match self {
-            StatementVariant::SwitchStatement(node) => node,
-            _ => panic!(),
-        }
-    }
-    fn as_mut_decorated_statement(&mut self) -> &mut DecoratedStatement {
-        match self {
-            StatementVariant::DecoratedStatement(node) => node,
-            _ => panic!(),
+            StatementVariant::NotStatement(x) => {
+                x.parent = Some(parent);
+                x.set_parents();
+            }
+            StatementVariant::BlockStatement(x) => {
+                x.parent = Some(parent);
+                x.set_parents();
+            }
+            StatementVariant::IfStatement(x) => {
+                x.parent = Some(parent);
+                x.set_parents();
+            }
+            StatementVariant::SwitchStatement(x) => {
+                x.parent = Some(parent);
+                x.set_parents();
+            }
+            StatementVariant::DecoratedStatement(x) => {
+                x.parent = Some(parent);
+                x.set_parents();
+            }
+            StatementVariant::None => {}
         }
     }
 }
@@ -2339,28 +2264,26 @@ impl BlockStatementHeaderVariant {
             BlockStatementHeaderVariant::BeginHeader(node) => node,
         }
     }
-    fn as_mut_for_header(&mut self) -> &mut ForHeader {
+
+    fn set_union_parent(&mut self, parent: *const dyn Node) {
         match self {
-            BlockStatementHeaderVariant::ForHeader(node) => node,
-            _ => panic!(),
-        }
-    }
-    fn as_mut_while_header(&mut self) -> &mut WhileHeader {
-        match self {
-            BlockStatementHeaderVariant::WhileHeader(node) => node,
-            _ => panic!(),
-        }
-    }
-    fn as_mut_function_header(&mut self) -> &mut FunctionHeader {
-        match self {
-            BlockStatementHeaderVariant::FunctionHeader(node) => node,
-            _ => panic!(),
-        }
-    }
-    fn as_mut_begin_header(&mut self) -> &mut BeginHeader {
-        match self {
-            BlockStatementHeaderVariant::BeginHeader(node) => node,
-            _ => panic!(),
+            BlockStatementHeaderVariant::ForHeader(x) => {
+                x.parent = Some(parent);
+                x.set_parents();
+            }
+            BlockStatementHeaderVariant::WhileHeader(x) => {
+                x.parent = Some(parent);
+                x.set_parents();
+            }
+            BlockStatementHeaderVariant::FunctionHeader(x) => {
+                x.parent = Some(parent);
+                x.set_parents();
+            }
+            BlockStatementHeaderVariant::BeginHeader(x) => {
+                x.parent = Some(parent);
+                x.set_parents();
+            }
+            BlockStatementHeaderVariant::None => {}
         }
     }
 }
