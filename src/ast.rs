@@ -24,6 +24,7 @@ use crate::tokenizer::{
     TOK_ACCEPT_UNFINISHED, TOK_CONTINUE_AFTER_ERROR, TOK_SHOW_COMMENTS,
 };
 use crate::wchar::prelude::*;
+use enum_dispatch::enum_dispatch;
 use std::ops::{ControlFlow, Index, IndexMut};
 
 /**
@@ -37,6 +38,7 @@ pub trait NodeVisitor<'a> {
     fn visit(&mut self, node: &'a dyn Node);
 }
 
+#[enum_dispatch]
 pub trait Acceptor {
     fn accept<'a>(&'a self, visitor: &mut dyn NodeVisitor<'a>, reversed: bool);
 }
@@ -57,6 +59,7 @@ pub struct MissingEndError {
 
 pub type VisitResult = ControlFlow<MissingEndError>;
 
+#[enum_dispatch]
 trait AcceptorMut {
     fn accept_mut(&mut self, visitor: &mut Populator<'_>, reversed: bool);
 }
@@ -71,6 +74,7 @@ impl<T: AcceptorMut> AcceptorMut for Option<T> {
 }
 
 /// Node is the base trait of all AST nodes.
+#[enum_dispatch]
 pub trait Node: Acceptor + ConcreteNode + std::fmt::Debug {
     /// The parent node, or null if this is root.
     fn parent(&self) -> Option<&dyn Node>;
@@ -123,8 +127,10 @@ pub trait Node: Acceptor + ConcreteNode + std::fmt::Debug {
 }
 
 /// NodeMut is a mutable node.
+#[enum_dispatch]
 trait NodeMut: Node + AcceptorMut + ConcreteNodeMut {}
 
+#[enum_dispatch]
 pub trait ConcreteNode {
     // Cast to any sub-trait.
     fn as_leaf(&self) -> Option<&dyn Leaf> {
@@ -243,6 +249,7 @@ pub trait ConcreteNode {
 }
 
 #[allow(unused)]
+#[enum_dispatch]
 trait ConcreteNodeMut {
     // Cast to any sub-trait.
     fn as_mut_leaf(&mut self) -> Option<&mut dyn Leaf> {
@@ -3992,6 +3999,116 @@ fn test_ast_parse() {
     let ast = Ast::parse(src, ParseTreeFlags::empty(), None);
     assert!(!ast.any_error);
 }
+
+mod v2 {
+    #![allow(deprecated)]
+
+    macro_rules! dispatch {
+        (
+            $(#[$attr:meta])*
+            $vis:vis enum $name:ident;
+            $($variant:ident),* $(,)?
+        ) => {
+            $(#[$attr])*
+            #[derive(Debug)]
+            #[enum_dispatch(ConcreteNode, Acceptor, Node, ConcreteNodeMut, NodeMut, AcceptorMut)]
+            $vis enum $name {
+                $($variant($variant)),*
+            }
+        }
+    }
+
+    use super::*;
+    dispatch! {
+        pub enum Node2;
+
+        Branch,
+        Leaf2,
+        List2,
+    }
+
+    dispatch! {
+        pub enum Branch;
+
+        Redirection,
+        ArgumentOrRedirection,
+        Statement,
+        JobPipeline,
+        JobConjunction,
+        ForHeader,
+        WhileHeader,
+        FunctionHeader,
+        BeginHeader,
+        BlockStatement,
+        IfClause,
+        ElseifClause,
+        ElseClause,
+        IfStatement,
+        CaseItem,
+        SwitchStatement,
+        DecoratedStatement,
+        NotStatement,
+        JobContinuation,
+        AndorJob,
+        FreestandingArgumentList,
+    }
+
+    dispatch! {
+        pub enum Leaf2;
+
+        VariableAssignment,
+        MaybeNewlines,
+        Argument,
+        Keyword2,
+        Token2,
+    }
+
+    dispatch! {
+        pub enum Keyword2;
+
+        DecoratedStatementDecorator,
+        JobConjunctionDecorator,
+        KeywordBegin,
+        KeywordCase,
+        KeywordElse,
+        KeywordEnd,
+        KeywordFor,
+        KeywordFunction,
+        KeywordIf,
+        KeywordIn,
+        KeywordNot,
+        KeywordSwitch,
+        KeywordTime,
+        KeywordWhile,
+    }
+
+    dispatch! {
+        pub enum Token2;
+
+        SemiNl,
+        String_,
+        TokenBackground,
+        TokenConjunction,
+        TokenPipe,
+        TokenRedirection,
+    }
+
+    dispatch! {
+        pub enum List2;
+
+        VariableAssignmentList,
+        ArgumentOrRedirectionList,
+        ElseifClauseList,
+        JobContinuationList,
+        AndorJobList,
+        JobConjunctionContinuationList,
+        ArgumentList,
+        JobList,
+        CaseItemList,
+    }
+}
+
+pub use v2::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Category {
