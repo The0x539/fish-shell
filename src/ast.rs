@@ -650,7 +650,6 @@ pub trait Leaf: Node {
     fn has_source(&self) -> bool {
         self.range().is_some()
     }
-    fn leaf_as_node(&self) -> &dyn Node;
 }
 
 // A token node is a node which contains a token, which must be one of a fixed set.
@@ -763,9 +762,6 @@ impl<T: Leaf> Leaf for &T {
     fn range_mut(&mut self) -> &mut Option<SourceRange> {
         unimplemented!()
     }
-    fn leaf_as_node(&self) -> &dyn Node {
-        T::leaf_as_node(self)
-    }
 }
 impl<T: Leaf> Leaf for &mut T {
     fn range(&self) -> Option<SourceRange> {
@@ -773,9 +769,6 @@ impl<T: Leaf> Leaf for &mut T {
     }
     fn range_mut(&mut self) -> &mut Option<SourceRange> {
         T::range_mut(self)
-    }
-    fn leaf_as_node(&self) -> &dyn Node {
-        T::leaf_as_node(self)
     }
 }
 impl<T: Keyword> Keyword for &T {
@@ -874,9 +867,6 @@ macro_rules! implement_leaf {
             }
             fn range_mut(&mut self) -> &mut Option<SourceRange> {
                 &mut self.range
-            }
-            fn leaf_as_node(&self) -> &dyn Node {
-                self
             }
         }
         impl Acceptor for $name {
@@ -1240,7 +1230,7 @@ macro_rules! visit_union_field {
         $field:expr,
         $visitor:ident
     ) => {
-        $visitor.visit($field.embedded_node().as_node())
+        $visitor.visit($field.embedded_node())
     };
     (
         visit_mut,
@@ -2067,10 +2057,10 @@ impl ArgumentOrRedirectionVariant {
         self.embedded_node().try_source_range()
     }
 
-    fn embedded_node(&self) -> &dyn NodeMut {
+    fn embedded_node(&self) -> NodeEnumRef<'_> {
         match self {
-            ArgumentOrRedirectionVariant::Argument(node) => node,
-            ArgumentOrRedirectionVariant::Redirection(node) => node,
+            ArgumentOrRedirectionVariant::Argument(node) => node.as_node(),
+            ArgumentOrRedirectionVariant::Redirection(node) => node.as_node(),
         }
     }
     fn as_mut_argument(&mut self) -> &mut Argument {
@@ -2196,14 +2186,14 @@ impl StatementVariant {
         }
     }
 
-    fn embedded_node(&self) -> &dyn NodeMut {
+    fn embedded_node(&self) -> NodeEnumRef {
         match self {
             StatementVariant::None => panic!("cannot visit null statement"),
-            StatementVariant::NotStatement(node) => node,
-            StatementVariant::BlockStatement(node) => node,
-            StatementVariant::IfStatement(node) => &**node,
-            StatementVariant::SwitchStatement(node) => node,
-            StatementVariant::DecoratedStatement(node) => node,
+            StatementVariant::NotStatement(node) => node.as_node(),
+            StatementVariant::BlockStatement(node) => node.as_node(),
+            StatementVariant::IfStatement(node) => node.as_node(),
+            StatementVariant::SwitchStatement(node) => node.as_node(),
+            StatementVariant::DecoratedStatement(node) => node.as_node(),
         }
     }
     fn as_mut_not_statement(&mut self) -> &mut NotStatement {
@@ -2309,13 +2299,13 @@ impl BlockStatementHeaderVariant {
         }
     }
 
-    fn embedded_node(&self) -> &dyn NodeMut {
+    fn embedded_node(&self) -> NodeEnumRef<'_> {
         match self {
             BlockStatementHeaderVariant::None => panic!("cannot visit null block header"),
-            BlockStatementHeaderVariant::ForHeader(node) => node,
-            BlockStatementHeaderVariant::WhileHeader(node) => node,
-            BlockStatementHeaderVariant::FunctionHeader(node) => node,
-            BlockStatementHeaderVariant::BeginHeader(node) => node,
+            BlockStatementHeaderVariant::ForHeader(node) => node.as_node(),
+            BlockStatementHeaderVariant::WhileHeader(node) => node.as_node(),
+            BlockStatementHeaderVariant::FunctionHeader(node) => node.as_node(),
+            BlockStatementHeaderVariant::BeginHeader(node) => node.as_node(),
         }
     }
     fn as_mut_for_header(&mut self) -> &mut ForHeader {
@@ -2914,7 +2904,7 @@ impl Populator<'_> {
         self.depth += 1
     }
 
-    fn did_visit_fields_of<'a>(&'a mut self, node: &'a dyn NodeMut, flow: VisitResult) {
+    fn did_visit_fields_of<'a>(&'a mut self, node: &impl Node, flow: VisitResult) {
         self.depth -= 1;
 
         if self.unwinding {
@@ -2928,11 +2918,14 @@ impl Populator<'_> {
         // for the block's keyword (for, if, etc) and a user-presentable description. This
         // is used to provide better error messages. Note at this point the parse tree is
         // incomplete; in particular parent nodes are not set.
-        let mut cursor = node;
+        let mut cursor = node.as_node();
         let header = loop {
             match cursor.typ() {
                 Type::block_statement => {
-                    cursor = cursor.as_block_statement().unwrap().header.embedded_node();
+                    let NodeEnumRef::Branch(BranchRef::BlockStatement(block_stmt)) = cursor else {
+                        panic!();
+                    };
+                    cursor = block_stmt.header.embedded_node();
                 }
                 Type::for_header => {
                     let n = cursor.as_for_header().unwrap();
