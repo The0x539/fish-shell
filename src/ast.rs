@@ -152,240 +152,145 @@ pub trait Node: Acceptor + ConcreteNode + std::fmt::Debug {
 /// NodeMut is a mutable node.
 trait NodeMut: Node + AcceptorMut + ConcreteNodeMut {}
 
-pub trait ConcreteNode {
-    // Cast to any sub-trait.
-    fn as_leaf(&self) -> Option<&dyn Leaf> {
-        None
-    }
-    fn as_keyword(&self) -> Option<&dyn Keyword> {
-        None
-    }
-    fn as_token(&self) -> Option<&dyn Token> {
-        None
-    }
+macro_rules! define_node {
+    (
+        $(#[$node_attr:meta])*
+        pub enum $node:ident;
 
-    // Cast to any node type.
-    fn as_redirection(&self) -> Option<&Redirection> {
-        None
-    }
-    fn as_variable_assignment(&self) -> Option<&VariableAssignment> {
-        None
-    }
-    fn as_variable_assignment_list(&self) -> Option<&VariableAssignmentList> {
-        None
-    }
-    fn as_argument_or_redirection(&self) -> Option<&ArgumentOrRedirection> {
-        None
-    }
-    fn as_argument_or_redirection_list(&self) -> Option<&ArgumentOrRedirectionList> {
-        None
-    }
-    fn as_statement(&self) -> Option<&Statement> {
-        None
-    }
-    fn as_job_pipeline(&self) -> Option<&JobPipeline> {
-        None
-    }
-    fn as_job_conjunction(&self) -> Option<&JobConjunction> {
-        None
-    }
-    fn as_for_header(&self) -> Option<&ForHeader> {
-        None
-    }
-    fn as_while_header(&self) -> Option<&WhileHeader> {
-        None
-    }
-    fn as_function_header(&self) -> Option<&FunctionHeader> {
-        None
-    }
-    fn as_begin_header(&self) -> Option<&BeginHeader> {
-        None
-    }
-    fn as_block_statement(&self) -> Option<&BlockStatement> {
-        None
-    }
-    fn as_if_clause(&self) -> Option<&IfClause> {
-        None
-    }
-    fn as_elseif_clause(&self) -> Option<&ElseifClause> {
-        None
-    }
-    fn as_elseif_clause_list(&self) -> Option<&ElseifClauseList> {
-        None
-    }
-    fn as_else_clause(&self) -> Option<&ElseClause> {
-        None
-    }
-    fn as_if_statement(&self) -> Option<&IfStatement> {
-        None
-    }
-    fn as_case_item(&self) -> Option<&CaseItem> {
-        None
-    }
-    fn as_switch_statement(&self) -> Option<&SwitchStatement> {
-        None
-    }
-    fn as_decorated_statement(&self) -> Option<&DecoratedStatement> {
-        None
-    }
-    fn as_not_statement(&self) -> Option<&NotStatement> {
-        None
-    }
-    fn as_job_continuation(&self) -> Option<&JobContinuation> {
-        None
-    }
-    fn as_job_continuation_list(&self) -> Option<&JobContinuationList> {
-        None
-    }
-    fn as_job_conjunction_continuation(&self) -> Option<&JobConjunctionContinuation> {
-        None
-    }
-    fn as_andor_job(&self) -> Option<&AndorJob> {
-        None
-    }
-    fn as_andor_job_list(&self) -> Option<&AndorJobList> {
-        None
-    }
-    fn as_freestanding_argument_list(&self) -> Option<&FreestandingArgumentList> {
-        None
-    }
-    fn as_job_conjunction_continuation_list(&self) -> Option<&JobConjunctionContinuationList> {
-        None
-    }
-    fn as_maybe_newlines(&self) -> Option<&MaybeNewlines> {
-        None
-    }
-    fn as_case_item_list(&self) -> Option<&CaseItemList> {
-        None
-    }
-    fn as_argument(&self) -> Option<&Argument> {
-        None
-    }
-    fn as_argument_list(&self) -> Option<&ArgumentList> {
-        None
-    }
-    fn as_job_list(&self) -> Option<&JobList> {
-        None
-    }
+        $(#[$downcast_attr:meta])*
+        $downcast_vis:vis trait $downcast:ident;
+
+        $(#[$downcast_mut_attr:meta])*
+        $downcast_mut_vis:vis trait $downcast_mut:ident;
+
+        $(
+            pub enum $category:ident {
+                $($variant:ident,)*
+                $(@)?
+                $(
+                    pub enum $subcategory:ident {
+                        $($subvariant:ident,)*
+                    }
+                )*
+            }
+        )*
+    ) => {paste::paste!{
+        $(#[$node_attr])*
+        pub enum $node {
+            $($category($category),)*
+        }
+
+        $(
+            pub enum $category {
+                $($variant($variant),)*
+                $($subcategory($subcategory),)*
+            }
+
+            $(
+                pub enum $subcategory {
+                    $($subvariant($subvariant),)*
+                }
+            )*
+        )*
+
+        $(#[$downcast_attr])*
+        $downcast_vis trait $downcast {
+            fn as_leaf(&self) -> Option<&dyn Leaf> { None }
+            fn as_keyword(&self) -> Option<&dyn Keyword> { None }
+            fn as_token(&self) -> Option<&dyn Token> { None }
+
+            $($(
+                fn [< as_ $variant:snake >] (&self) -> Option<&$variant> { None }
+            )*)*
+        }
+
+        $(#[$downcast_mut_attr])*
+        $downcast_mut_vis trait $downcast_mut {
+            fn as_mut_leaf(&mut self) -> Option<&mut dyn Leaf> { None }
+            fn as_mut_keyword(&mut self) -> Option<&mut dyn Keyword> { None }
+            fn as_mut_token(&mut self) -> Option<&mut dyn Token> { None }
+
+            $($(
+                fn [< as_mut_ $variant:snake >] (&mut self) -> Option<&mut $variant> { None }
+            )*)*
+        }
+    }}
 }
 
-#[allow(unused)]
-trait ConcreteNodeMut {
-    // Cast to any sub-trait.
-    fn as_mut_leaf(&mut self) -> Option<&mut dyn Leaf> {
-        None
-    }
-    fn as_mut_keyword(&mut self) -> Option<&mut dyn Keyword> {
-        None
-    }
-    fn as_mut_token(&mut self) -> Option<&mut dyn Token> {
-        None
+define_node! {
+    pub enum NodeEnum;
+
+    pub trait ConcreteNode;
+
+    #[allow(dead_code)]
+    trait ConcreteNodeMut;
+
+    pub enum Branch {
+        Redirection,
+        ArgumentOrRedirection,
+        Statement,
+        JobPipeline,
+        JobConjunction,
+        ForHeader,
+        WhileHeader,
+        FunctionHeader,
+        BeginHeader,
+        BlockStatement,
+        IfClause,
+        ElseifClause,
+        ElseClause,
+        IfStatement,
+        CaseItem,
+        SwitchStatement,
+        DecoratedStatement,
+        NotStatement,
+        JobContinuation,
+        JobConjunctionContinuation,
+        AndorJob,
+        FreestandingArgumentList,
     }
 
-    // Cast to any node type.
-    fn as_mut_redirection(&mut self) -> Option<&mut Redirection> {
-        None
+    pub enum LeafEnum {
+        VariableAssignment,
+        MaybeNewlines,
+        Argument,
+        @
+        pub enum KeywordEnum {
+            DecoratedStatementDecorator,
+            JobConjunctionDecorator,
+            KeywordBegin,
+            KeywordCase,
+            KeywordElse,
+            KeywordEnd,
+            KeywordFor,
+            KeywordFunction,
+            KeywordIf,
+            KeywordIn,
+            KeywordNot,
+            KeywordSwitch,
+            KeywordTime,
+            KeywordWhile,
+        }
+        pub enum TokenEnum {
+            SemiNl,
+            String_,
+            TokenBackground,
+            TokenConjunction,
+            TokenPipe,
+            TokenRedirection,
+        }
     }
-    fn as_mut_variable_assignment(&mut self) -> Option<&mut VariableAssignment> {
-        None
-    }
-    fn as_mut_variable_assignment_list(&mut self) -> Option<&mut VariableAssignmentList> {
-        None
-    }
-    fn as_mut_argument_or_redirection(&mut self) -> Option<&mut ArgumentOrRedirection> {
-        None
-    }
-    fn as_mut_argument_or_redirection_list(&mut self) -> Option<&mut ArgumentOrRedirectionList> {
-        None
-    }
-    fn as_mut_statement(&mut self) -> Option<&mut Statement> {
-        None
-    }
-    fn as_mut_job_pipeline(&mut self) -> Option<&mut JobPipeline> {
-        None
-    }
-    fn as_mut_job_conjunction(&mut self) -> Option<&mut JobConjunction> {
-        None
-    }
-    fn as_mut_for_header(&mut self) -> Option<&mut ForHeader> {
-        None
-    }
-    fn as_mut_while_header(&mut self) -> Option<&mut WhileHeader> {
-        None
-    }
-    fn as_mut_function_header(&mut self) -> Option<&mut FunctionHeader> {
-        None
-    }
-    fn as_mut_begin_header(&mut self) -> Option<&mut BeginHeader> {
-        None
-    }
-    fn as_mut_block_statement(&mut self) -> Option<&mut BlockStatement> {
-        None
-    }
-    fn as_mut_if_clause(&mut self) -> Option<&mut IfClause> {
-        None
-    }
-    fn as_mut_elseif_clause(&mut self) -> Option<&mut ElseifClause> {
-        None
-    }
-    fn as_mut_elseif_clause_list(&mut self) -> Option<&mut ElseifClauseList> {
-        None
-    }
-    fn as_mut_else_clause(&mut self) -> Option<&mut ElseClause> {
-        None
-    }
-    fn as_mut_if_statement(&mut self) -> Option<&mut IfStatement> {
-        None
-    }
-    fn as_mut_case_item(&mut self) -> Option<&mut CaseItem> {
-        None
-    }
-    fn as_mut_switch_statement(&mut self) -> Option<&mut SwitchStatement> {
-        None
-    }
-    fn as_mut_decorated_statement(&mut self) -> Option<&mut DecoratedStatement> {
-        None
-    }
-    fn as_mut_not_statement(&mut self) -> Option<&mut NotStatement> {
-        None
-    }
-    fn as_mut_job_continuation(&mut self) -> Option<&mut JobContinuation> {
-        None
-    }
-    fn as_mut_job_continuation_list(&mut self) -> Option<&mut JobContinuationList> {
-        None
-    }
-    fn as_mut_job_conjunction_continuation(&mut self) -> Option<&mut JobConjunctionContinuation> {
-        None
-    }
-    fn as_mut_andor_job(&mut self) -> Option<&mut AndorJob> {
-        None
-    }
-    fn as_mut_andor_job_list(&mut self) -> Option<&mut AndorJobList> {
-        None
-    }
-    fn as_mut_freestanding_argument_list(&mut self) -> Option<&mut FreestandingArgumentList> {
-        None
-    }
-    fn as_mut_job_conjunction_continuation_list(
-        &mut self,
-    ) -> Option<&mut JobConjunctionContinuationList> {
-        None
-    }
-    fn as_mut_maybe_newlines(&mut self) -> Option<&mut MaybeNewlines> {
-        None
-    }
-    fn as_mut_case_item_list(&mut self) -> Option<&mut CaseItemList> {
-        None
-    }
-    fn as_mut_argument(&mut self) -> Option<&mut Argument> {
-        None
-    }
-    fn as_mut_argument_list(&mut self) -> Option<&mut ArgumentList> {
-        None
-    }
-    fn as_mut_job_list(&mut self) -> Option<&mut JobList> {
-        None
+
+    pub enum ListEnum {
+        VariableAssignmentList,
+        ArgumentOrRedirectionList,
+        ElseifClauseList,
+        JobContinuationList,
+        AndorJobList,
+        JobConjunctionContinuationList,
+        ArgumentList,
+        JobList,
+        CaseItemList,
     }
 }
 
