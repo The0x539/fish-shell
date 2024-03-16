@@ -214,6 +214,35 @@ macro_rules! define_node {
                 fn [< as_mut_ $variant:snake >] (&mut self) -> Option<&mut $variant> { None }
             )*)*
         }
+
+        $(
+            impl_downcast!($downcast, $downcast_mut, $category, $($variant),*);
+        )*
+    }}
+}
+
+macro_rules! impl_downcast {
+    (
+        $downcast:ident,
+        $downcast_mut:ident,
+        LeafEnum,
+        $($variant:ident),*
+    ) => {};
+    (
+        $downcast:ident,
+        $downcast_mut:ident,
+        $category:ident,
+        $($variant:ident),*
+    ) => {paste::paste!{
+        $(
+            impl $downcast for $variant {
+                fn [< as_ $variant:snake >] (&self) -> Option<&Self> { Some(self) }
+            }
+
+            impl $downcast_mut for $variant {
+                fn [< as_mut_ $variant:snake >] (&mut self) -> Option<&mut Self> { Some(self) }
+            }
+        )*
     }}
 }
 
@@ -991,16 +1020,6 @@ pub struct Redirection {
 }
 implement_node!(Redirection, branch, redirection);
 implement_acceptor_for_branch!(Redirection, (oper: TokenRedirection), (target: String_));
-impl ConcreteNode for Redirection {
-    fn as_redirection(&self) -> Option<&Redirection> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for Redirection {
-    fn as_mut_redirection(&mut self) -> Option<&mut Redirection> {
-        Some(self)
-    }
-}
 impl CheckParse for Redirection {
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
         pop.peek_type(0) == ParseTokenType::redirection
@@ -1012,16 +1031,6 @@ define_list_node!(
     variable_assignment_list,
     VariableAssignment
 );
-impl ConcreteNode for VariableAssignmentList {
-    fn as_variable_assignment_list(&self) -> Option<&VariableAssignmentList> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for VariableAssignmentList {
-    fn as_mut_variable_assignment_list(&mut self) -> Option<&mut VariableAssignmentList> {
-        Some(self)
-    }
-}
 
 /// An argument or redirection holds either an argument or redirection.
 #[derive(Default, Debug)]
@@ -1034,16 +1043,6 @@ implement_acceptor_for_branch!(
     ArgumentOrRedirection,
     (contents: (Box<ArgumentOrRedirectionVariant>))
 );
-impl ConcreteNode for ArgumentOrRedirection {
-    fn as_argument_or_redirection(&self) -> Option<&ArgumentOrRedirection> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for ArgumentOrRedirection {
-    fn as_mut_argument_or_redirection(&mut self) -> Option<&mut ArgumentOrRedirection> {
-        Some(self)
-    }
-}
 impl CheckParse for ArgumentOrRedirection {
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
         let typ = pop.peek_type(0);
@@ -1056,16 +1055,6 @@ define_list_node!(
     argument_or_redirection_list,
     ArgumentOrRedirection
 );
-impl ConcreteNode for ArgumentOrRedirectionList {
-    fn as_argument_or_redirection_list(&self) -> Option<&ArgumentOrRedirectionList> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for ArgumentOrRedirectionList {
-    fn as_mut_argument_or_redirection_list(&mut self) -> Option<&mut ArgumentOrRedirectionList> {
-        Some(self)
-    }
-}
 
 /// A statement is a normal command, or an if / while / etc
 #[derive(Default, Debug)]
@@ -1075,16 +1064,6 @@ pub struct Statement {
 }
 implement_node!(Statement, branch, statement);
 implement_acceptor_for_branch!(Statement, (contents: (Box<StatementVariant>)));
-impl ConcreteNode for Statement {
-    fn as_statement(&self) -> Option<&Statement> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for Statement {
-    fn as_mut_statement(&mut self) -> Option<&mut Statement> {
-        Some(self)
-    }
-}
 
 /// A job is a non-empty list of statements, separated by pipes. (Non-empty is useful for cases
 /// like if statements, where we require a command).
@@ -1111,16 +1090,6 @@ implement_acceptor_for_branch!(
     (continuation: (JobContinuationList)),
     (bg: (Option<TokenBackground>)),
 );
-impl ConcreteNode for JobPipeline {
-    fn as_job_pipeline(&self) -> Option<&JobPipeline> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for JobPipeline {
-    fn as_mut_job_pipeline(&mut self) -> Option<&mut JobPipeline> {
-        Some(self)
-    }
-}
 
 /// A job_conjunction is a job followed by a && or || continuations.
 #[derive(Default, Debug)]
@@ -1145,16 +1114,6 @@ implement_acceptor_for_branch!(
     (continuations: (JobConjunctionContinuationList)),
     (semi_nl: (Option<SemiNl>)),
 );
-impl ConcreteNode for JobConjunction {
-    fn as_job_conjunction(&self) -> Option<&JobConjunction> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for JobConjunction {
-    fn as_mut_job_conjunction(&mut self) -> Option<&mut JobConjunction> {
-        Some(self)
-    }
-}
 impl CheckParse for JobConjunction {
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
         let token = pop.peek_token(0);
@@ -1190,16 +1149,6 @@ implement_acceptor_for_branch!(
     (args: (ArgumentList)),
     (semi_nl: (SemiNl)),
 );
-impl ConcreteNode for ForHeader {
-    fn as_for_header(&self) -> Option<&ForHeader> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for ForHeader {
-    fn as_mut_for_header(&mut self) -> Option<&mut ForHeader> {
-        Some(self)
-    }
-}
 
 #[derive(Default, Debug)]
 pub struct WhileHeader {
@@ -1216,16 +1165,6 @@ implement_acceptor_for_branch!(
     (condition: (JobConjunction)),
     (andor_tail: (AndorJobList)),
 );
-impl ConcreteNode for WhileHeader {
-    fn as_while_header(&self) -> Option<&WhileHeader> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for WhileHeader {
-    fn as_mut_while_header(&mut self) -> Option<&mut WhileHeader> {
-        Some(self)
-    }
-}
 
 #[derive(Default, Debug)]
 pub struct FunctionHeader {
@@ -1244,16 +1183,6 @@ implement_acceptor_for_branch!(
     (args: (ArgumentList)),
     (semi_nl: (SemiNl)),
 );
-impl ConcreteNode for FunctionHeader {
-    fn as_function_header(&self) -> Option<&FunctionHeader> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for FunctionHeader {
-    fn as_mut_function_header(&mut self) -> Option<&mut FunctionHeader> {
-        Some(self)
-    }
-}
 
 #[derive(Default, Debug)]
 pub struct BeginHeader {
@@ -1269,16 +1198,6 @@ implement_acceptor_for_branch!(
     (kw_begin: (KeywordBegin)),
     (semi_nl: (Option<SemiNl>))
 );
-impl ConcreteNode for BeginHeader {
-    fn as_begin_header(&self) -> Option<&BeginHeader> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for BeginHeader {
-    fn as_mut_begin_header(&mut self) -> Option<&mut BeginHeader> {
-        Some(self)
-    }
-}
 
 #[derive(Default, Debug)]
 pub struct BlockStatement {
@@ -1300,16 +1219,6 @@ implement_acceptor_for_branch!(
     (end: (KeywordEnd)),
     (args_or_redirs: (ArgumentOrRedirectionList)),
 );
-impl ConcreteNode for BlockStatement {
-    fn as_block_statement(&self) -> Option<&BlockStatement> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for BlockStatement {
-    fn as_mut_block_statement(&mut self) -> Option<&mut BlockStatement> {
-        Some(self)
-    }
-}
 
 #[derive(Default, Debug)]
 pub struct IfClause {
@@ -1331,16 +1240,6 @@ implement_acceptor_for_branch!(
     (andor_tail: (AndorJobList)),
     (body: (JobList)),
 );
-impl ConcreteNode for IfClause {
-    fn as_if_clause(&self) -> Option<&IfClause> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for IfClause {
-    fn as_mut_if_clause(&mut self) -> Option<&mut IfClause> {
-        Some(self)
-    }
-}
 
 #[derive(Default, Debug)]
 pub struct ElseifClause {
@@ -1356,16 +1255,6 @@ implement_acceptor_for_branch!(
     (kw_else: (KeywordElse)),
     (if_clause: (IfClause)),
 );
-impl ConcreteNode for ElseifClause {
-    fn as_elseif_clause(&self) -> Option<&ElseifClause> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for ElseifClause {
-    fn as_mut_elseif_clause(&mut self) -> Option<&mut ElseifClause> {
-        Some(self)
-    }
-}
 impl CheckParse for ElseifClause {
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
         pop.peek_token(0).keyword == ParseKeyword::kw_else
@@ -1374,16 +1263,6 @@ impl CheckParse for ElseifClause {
 }
 
 define_list_node!(ElseifClauseList, elseif_clause_list, ElseifClause);
-impl ConcreteNode for ElseifClauseList {
-    fn as_elseif_clause_list(&self) -> Option<&ElseifClauseList> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for ElseifClauseList {
-    fn as_mut_elseif_clause_list(&mut self) -> Option<&mut ElseifClauseList> {
-        Some(self)
-    }
-}
 
 #[derive(Default, Debug)]
 pub struct ElseClause {
@@ -1400,16 +1279,6 @@ implement_acceptor_for_branch!(
     (semi_nl: (SemiNl)),
     (body: (JobList)),
 );
-impl ConcreteNode for ElseClause {
-    fn as_else_clause(&self) -> Option<&ElseClause> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for ElseClause {
-    fn as_mut_else_clause(&mut self) -> Option<&mut ElseClause> {
-        Some(self)
-    }
-}
 impl CheckParse for ElseClause {
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
         pop.peek_token(0).keyword == ParseKeyword::kw_else
@@ -1439,16 +1308,6 @@ implement_acceptor_for_branch!(
     (end: (KeywordEnd)),
     (args_or_redirs: (ArgumentOrRedirectionList)),
 );
-impl ConcreteNode for IfStatement {
-    fn as_if_statement(&self) -> Option<&IfStatement> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for IfStatement {
-    fn as_mut_if_statement(&mut self) -> Option<&mut IfStatement> {
-        Some(self)
-    }
-}
 
 #[derive(Default, Debug)]
 pub struct CaseItem {
@@ -1467,16 +1326,6 @@ implement_acceptor_for_branch!(
     (semi_nl: (SemiNl)),
     (body: (JobList)),
 );
-impl ConcreteNode for CaseItem {
-    fn as_case_item(&self) -> Option<&CaseItem> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for CaseItem {
-    fn as_mut_case_item(&mut self) -> Option<&mut CaseItem> {
-        Some(self)
-    }
-}
 impl CheckParse for CaseItem {
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
         pop.peek_token(0).keyword == ParseKeyword::kw_case
@@ -1504,16 +1353,6 @@ implement_acceptor_for_branch!(
     (end: (KeywordEnd)),
     (args_or_redirs: (ArgumentOrRedirectionList)),
 );
-impl ConcreteNode for SwitchStatement {
-    fn as_switch_statement(&self) -> Option<&SwitchStatement> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for SwitchStatement {
-    fn as_mut_switch_statement(&mut self) -> Option<&mut SwitchStatement> {
-        Some(self)
-    }
-}
 
 /// A decorated_statement is a command with a list of arguments_or_redirections, possibly with
 /// "builtin" or "command" or "exec"
@@ -1534,16 +1373,6 @@ implement_acceptor_for_branch!(
     (command: (String_)),
     (args_or_redirs: (ArgumentOrRedirectionList)),
 );
-impl ConcreteNode for DecoratedStatement {
-    fn as_decorated_statement(&self) -> Option<&DecoratedStatement> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for DecoratedStatement {
-    fn as_mut_decorated_statement(&mut self) -> Option<&mut DecoratedStatement> {
-        Some(self)
-    }
-}
 
 /// A not statement like `not true` or `! true`
 #[derive(Default, Debug)]
@@ -1563,16 +1392,6 @@ implement_acceptor_for_branch!(
     (time: (Option<KeywordTime>)),
     (contents: (Statement)),
 );
-impl ConcreteNode for NotStatement {
-    fn as_not_statement(&self) -> Option<&NotStatement> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for NotStatement {
-    fn as_mut_not_statement(&mut self) -> Option<&mut NotStatement> {
-        Some(self)
-    }
-}
 
 #[derive(Default, Debug)]
 pub struct JobContinuation {
@@ -1590,16 +1409,6 @@ implement_acceptor_for_branch!(
     (variables: (VariableAssignmentList)),
     (statement: (Statement)),
 );
-impl ConcreteNode for JobContinuation {
-    fn as_job_continuation(&self) -> Option<&JobContinuation> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for JobContinuation {
-    fn as_mut_job_continuation(&mut self) -> Option<&mut JobContinuation> {
-        Some(self)
-    }
-}
 impl CheckParse for JobContinuation {
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
         pop.peek_type(0) == ParseTokenType::pipe
@@ -1607,16 +1416,6 @@ impl CheckParse for JobContinuation {
 }
 
 define_list_node!(JobContinuationList, job_continuation_list, JobContinuation);
-impl ConcreteNode for JobContinuationList {
-    fn as_job_continuation_list(&self) -> Option<&JobContinuationList> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for JobContinuationList {
-    fn as_mut_job_continuation_list(&mut self) -> Option<&mut JobContinuationList> {
-        Some(self)
-    }
-}
 
 #[derive(Default, Debug)]
 pub struct JobConjunctionContinuation {
@@ -1638,16 +1437,6 @@ implement_acceptor_for_branch!(
     (newlines: (MaybeNewlines)),
     (job: (JobPipeline)),
 );
-impl ConcreteNode for JobConjunctionContinuation {
-    fn as_job_conjunction_continuation(&self) -> Option<&JobConjunctionContinuation> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for JobConjunctionContinuation {
-    fn as_mut_job_conjunction_continuation(&mut self) -> Option<&mut JobConjunctionContinuation> {
-        Some(self)
-    }
-}
 impl CheckParse for JobConjunctionContinuation {
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
         let typ = pop.peek_type(0);
@@ -1665,16 +1454,6 @@ pub struct AndorJob {
 }
 implement_node!(AndorJob, branch, andor_job);
 implement_acceptor_for_branch!(AndorJob, (job: (JobConjunction)));
-impl ConcreteNode for AndorJob {
-    fn as_andor_job(&self) -> Option<&AndorJob> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for AndorJob {
-    fn as_mut_andor_job(&mut self) -> Option<&mut AndorJob> {
-        Some(self)
-    }
-}
 impl CheckParse for AndorJob {
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
         let keyword = pop.peek_token(0).keyword;
@@ -1689,16 +1468,6 @@ impl CheckParse for AndorJob {
 }
 
 define_list_node!(AndorJobList, andor_job_list, AndorJob);
-impl ConcreteNode for AndorJobList {
-    fn as_andor_job_list(&self) -> Option<&AndorJobList> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for AndorJobList {
-    fn as_mut_andor_job_list(&mut self) -> Option<&mut AndorJobList> {
-        Some(self)
-    }
-}
 
 /// A freestanding_argument_list is equivalent to a normal argument list, except it may contain
 /// TOK_END (newlines, and even semicolons, for historical reasons).
@@ -1710,71 +1479,19 @@ pub struct FreestandingArgumentList {
 }
 implement_node!(FreestandingArgumentList, branch, freestanding_argument_list);
 implement_acceptor_for_branch!(FreestandingArgumentList, (arguments: (ArgumentList)));
-impl ConcreteNode for FreestandingArgumentList {
-    fn as_freestanding_argument_list(&self) -> Option<&FreestandingArgumentList> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for FreestandingArgumentList {
-    fn as_mut_freestanding_argument_list(&mut self) -> Option<&mut FreestandingArgumentList> {
-        Some(self)
-    }
-}
 
 define_list_node!(
     JobConjunctionContinuationList,
     job_conjunction_continuation_list,
     JobConjunctionContinuation
 );
-impl ConcreteNode for JobConjunctionContinuationList {
-    fn as_job_conjunction_continuation_list(&self) -> Option<&JobConjunctionContinuationList> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for JobConjunctionContinuationList {
-    fn as_mut_job_conjunction_continuation_list(
-        &mut self,
-    ) -> Option<&mut JobConjunctionContinuationList> {
-        Some(self)
-    }
-}
 
 define_list_node!(ArgumentList, argument_list, Argument);
-impl ConcreteNode for ArgumentList {
-    fn as_argument_list(&self) -> Option<&ArgumentList> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for ArgumentList {
-    fn as_mut_argument_list(&mut self) -> Option<&mut ArgumentList> {
-        Some(self)
-    }
-}
 
 // For historical reasons, a job list is a list of job *conjunctions*. This should be fixed.
 define_list_node!(JobList, job_list, JobConjunction);
-impl ConcreteNode for JobList {
-    fn as_job_list(&self) -> Option<&JobList> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for JobList {
-    fn as_mut_job_list(&mut self) -> Option<&mut JobList> {
-        Some(self)
-    }
-}
 
 define_list_node!(CaseItemList, case_item_list, CaseItem);
-impl ConcreteNode for CaseItemList {
-    fn as_case_item_list(&self) -> Option<&CaseItemList> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for CaseItemList {
-    fn as_mut_case_item_list(&mut self) -> Option<&mut CaseItemList> {
-        Some(self)
-    }
-}
 
 /// A variable_assignment contains a source range like FOO=bar.
 #[derive(Default, Debug)]
@@ -1793,6 +1510,9 @@ impl ConcreteNode for VariableAssignment {
     }
 }
 impl ConcreteNodeMut for VariableAssignment {
+    fn as_mut_leaf(&mut self) -> Option<&mut dyn Leaf> {
+        Some(self)
+    }
     fn as_mut_variable_assignment(&mut self) -> Option<&mut VariableAssignment> {
         Some(self)
     }
