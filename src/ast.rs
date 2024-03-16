@@ -209,9 +209,9 @@ macro_rules! define_node {
 
         $(#[$downcast_mut_attr])*
         $downcast_mut_vis trait $downcast_mut {
-            fn as_mut_leaf(&mut self) -> Option<&mut dyn Leaf> { None }
-            fn as_mut_keyword(&mut self) -> Option<&mut dyn Keyword> { None }
-            fn as_mut_token(&mut self) -> Option<&mut dyn Token> { None }
+            fn as_mut_leaf(&mut self) -> Option<LeafRefMut<'_>> { None }
+            fn as_mut_keyword(&mut self) -> Option<KeywordRefMut<'_>> { None }
+            fn as_mut_token(&mut self) -> Option<TokenRefMut<'_>> { None }
 
             $($(
                 fn [< as_mut_ $variant:snake >] (&mut self) -> Option<&mut $variant> { None }
@@ -232,6 +232,40 @@ macro_rules! define_node {
             $($(
                 fn [< as_ $variant:snake >] (&self) -> Option<&$variant> {
                     T::[< as_ $variant:snake >](self)
+                }
+            )*)*
+        }
+        impl<T: $downcast> $downcast for &mut T {
+            fn as_leaf(&self) -> Option<LeafRef<'_>> {
+                T::as_leaf(self)
+            }
+            fn as_keyword(&self) -> Option<KeywordRef<'_>> {
+                T::as_keyword(self)
+            }
+            fn as_token(&self) -> Option<TokenRef<'_>> {
+                T::as_token(self)
+            }
+
+            $($(
+                fn [< as_ $variant:snake >] (&self) -> Option<&$variant> {
+                    T::[< as_ $variant:snake >](self)
+                }
+            )*)*
+        }
+        impl<T: $downcast_mut> $downcast_mut for &mut T {
+            fn as_mut_leaf(&mut self) -> Option<LeafRefMut<'_>> {
+                T::as_mut_leaf(&mut *self)
+            }
+            fn as_mut_keyword(&mut self) -> Option<KeywordRefMut<'_>> {
+                T::as_mut_keyword(&mut *self)
+            }
+            fn as_mut_token(&mut self) -> Option<TokenRefMut<'_>> {
+                T::as_mut_token(&mut *self)
+            }
+
+            $($(
+                fn [< as_mut_ $variant:snake >] (&mut self) -> Option<&mut $variant> {
+                    T::[< as_mut_ $variant:snake >](self)
                 }
             )*)*
         }
@@ -264,7 +298,9 @@ macro_rules! impl_downcast {
                 fn [< as_ $variant:snake >] (&self) -> Option<&Self> { Some(self) }
             }
             impl $downcast_mut for $variant {
-                fn as_mut_leaf (&mut self) -> Option<&mut dyn Leaf> { Some(self) }
+                fn as_mut_leaf (&mut self) -> Option<LeafRefMut<'_>> {
+                    Some(LeafRefMut::$variant(self))
+                }
                 fn [< as_mut_ $variant:snake >] (&mut self) -> Option<&mut Self> { Some(self) }
             }
         )*
@@ -276,6 +312,13 @@ macro_rules! impl_downcast {
             $($subcat( [< $subcat Ref >] <'n> ),)*
         }
 
+        #[enum_dispatch(Acceptor, Node, Leaf)]
+        #[derive(Debug)]
+        pub enum LeafRefMut<'n> {
+            $($variant(&'n mut $variant),)*
+            $($subcat( [< $subcat RefMut >] <'n> ),)*
+        }
+
         $(
             #[enum_dispatch(Acceptor, Node, Leaf, $subcat)]
             #[derive(Debug, Copy, Clone)]
@@ -283,14 +326,50 @@ macro_rules! impl_downcast {
                 $($subvariant(&'n $subvariant)),*
             }
 
-            impl $downcast for [< $subcat Ref >] <'_> {
-                fn as_leaf(&self) -> Option<LeafRef<'_>> {
-                    Some(LeafRef::$subcat(*self))
-                }
-                fn [< as_ $subcat:snake >] (&self) -> Option<Self> {
-                    Some(*self)
-                }
+            #[enum_dispatch(Acceptor, Node, Leaf, $subcat)]
+            #[derive(Debug)]
+            pub enum [< $subcat RefMut >] <'n> {
+                $($subvariant(&'n mut $subvariant)),*
             }
+
+            // This gives us a scope in which we can use some much-needed type aliases,
+            // at the cost of nesting.
+            const _: () = {
+                type Ref<'a> = [< $subcat Ref >] <'a>;
+                type RefMut<'a> = [< $subcat RefMut >] <'a>;
+
+                impl $downcast for Ref<'_> {
+                    fn as_leaf(&self) -> Option<LeafRef<'_>> {
+                        Some(LeafRef::$subcat(*self))
+                    }
+                    fn [< as_ $subcat:snake >] (&self) -> Option<Ref<'_>> {
+                        Some(*self)
+                    }
+                }
+
+                impl $downcast for RefMut<'_> {
+                    fn as_leaf(&self) -> Option<LeafRef<'_>> {
+                        self.[< as_ $subcat:snake >]().map(LeafRef::$subcat)
+                    }
+
+                    fn [< as_ $subcat:snake >] (&self) -> Option<Ref<'_>> {
+                        match self {
+                            $(Self::$subvariant(x) => Some(Ref::$subvariant(&*x))),*
+                        }
+                    }
+                }
+
+                impl $downcast_mut for RefMut<'_> {
+                    fn as_mut_leaf(&mut self) -> Option<LeafRefMut<'_>> {
+                        self.[< as_mut_ $subcat:snake >]().map(LeafRefMut::$subcat)
+                    }
+                    fn [< as_mut_ $subcat:snake >] (&mut self) -> Option<RefMut<'_>> {
+                        match self {
+                            $(Self::$subvariant(x) => Some(RefMut::$subvariant(&mut *x))),*
+                        }
+                    }
+                }
+            };
         )*
     }};
     (
@@ -408,6 +487,32 @@ impl ConcreteNode for LeafRef<'_> {
     }
 }
 
+impl ConcreteNode for LeafRefMut<'_> {
+    fn as_leaf(&self) -> Option<LeafRef<'_>> {
+        Some(match self {
+            Self::VariableAssignment(x) => LeafRef::VariableAssignment(x),
+            Self::MaybeNewlines(x) => LeafRef::MaybeNewlines(x),
+            Self::Argument(x) => LeafRef::Argument(x),
+            Self::Keyword(x) => LeafRef::Keyword(x.as_keyword()?),
+            Self::Token(x) => LeafRef::Token(x.as_token()?),
+        })
+    }
+    fn as_token(&self) -> Option<TokenRef<'_>> {
+        if let Self::Token(t) = self {
+            t.as_token()
+        } else {
+            None
+        }
+    }
+    fn as_keyword(&self) -> Option<KeywordRef<'_>> {
+        if let Self::Keyword(k) = self {
+            k.as_keyword()
+        } else {
+            None
+        }
+    }
+}
+
 /// Trait for all "leaf" nodes: nodes with no ast children.
 #[enum_dispatch]
 pub trait Leaf: Node {
@@ -494,7 +599,32 @@ impl<T: Node> Node for &T {
         T::as_node(self)
     }
 }
+impl<T: Node> Node for &mut T {
+    fn parent(&self) -> Option<&dyn Node> {
+        T::parent(self)
+    }
+    fn typ(&self) -> Type {
+        T::typ(self)
+    }
+    fn category(&self) -> Category {
+        T::category(self)
+    }
+    fn try_source_range(&self) -> Option<SourceRange> {
+        T::try_source_range(self)
+    }
+    fn as_ptr(&self) -> *const () {
+        T::as_ptr(self)
+    }
+    fn as_node(&self) -> &dyn Node {
+        T::as_node(self)
+    }
+}
 impl<T: Acceptor> Acceptor for &T {
+    fn accept<'a>(&'a self, visitor: &mut dyn NodeVisitor<'a>, reversed: bool) {
+        T::accept(self, visitor, reversed)
+    }
+}
+impl<T: Acceptor> Acceptor for &mut T {
     fn accept<'a>(&'a self, visitor: &mut dyn NodeVisitor<'a>, reversed: bool) {
         T::accept(self, visitor, reversed)
     }
@@ -506,6 +636,17 @@ impl<T: Leaf> Leaf for &T {
     // TODO: make this unnecessary
     fn range_mut(&mut self) -> &mut Option<SourceRange> {
         unimplemented!()
+    }
+    fn leaf_as_node(&self) -> &dyn Node {
+        T::leaf_as_node(self)
+    }
+}
+impl<T: Leaf> Leaf for &mut T {
+    fn range(&self) -> Option<SourceRange> {
+        T::range(self)
+    }
+    fn range_mut(&mut self) -> &mut Option<SourceRange> {
+        T::range_mut(self)
     }
     fn leaf_as_node(&self) -> &dyn Node {
         T::leaf_as_node(self)
@@ -523,6 +664,17 @@ impl<T: Keyword> Keyword for &T {
         T::allowed_keywords(self)
     }
 }
+impl<T: Keyword> Keyword for &mut T {
+    fn keyword(&self) -> ParseKeyword {
+        T::keyword(self)
+    }
+    fn keyword_mut(&mut self) -> &mut ParseKeyword {
+        T::keyword_mut(self)
+    }
+    fn allowed_keywords(&self) -> &'static [ParseKeyword] {
+        T::allowed_keywords(self)
+    }
+}
 impl<T: Token> Token for &T {
     fn token_type(&self) -> ParseTokenType {
         T::token_type(&self)
@@ -530,6 +682,17 @@ impl<T: Token> Token for &T {
     // TODO: make this unnecessary
     fn token_type_mut(&mut self) -> &mut ParseTokenType {
         unimplemented!()
+    }
+    fn allowed_tokens(&self) -> &'static [ParseTokenType] {
+        T::allowed_tokens(self)
+    }
+}
+impl<T: Token> Token for &mut T {
+    fn token_type(&self) -> ParseTokenType {
+        T::token_type(&self)
+    }
+    fn token_type_mut(&mut self) -> &mut ParseTokenType {
+        T::token_type_mut(self)
     }
     fn allowed_tokens(&self) -> &'static [ParseTokenType] {
         T::allowed_tokens(self)
@@ -628,11 +791,11 @@ macro_rules! define_keyword_node {
             }
         }
         impl ConcreteNodeMut for $name {
-            fn as_mut_leaf(&mut self) -> Option<&mut dyn Leaf> {
-                Some(self)
+            fn as_mut_leaf(&mut self) -> Option<LeafRefMut<'_>> {
+                Some(LeafRefMut::Keyword(KeywordRefMut::$name(self)))
             }
-            fn as_mut_keyword(&mut self) -> Option<&mut dyn Keyword> {
-                Some(self)
+            fn as_mut_keyword(&mut self) -> Option<KeywordRefMut<'_>> {
+                Some(KeywordRefMut::$name(self))
             }
         }
         impl Keyword for $name {
@@ -669,11 +832,11 @@ macro_rules! define_token_node {
             }
         }
         impl ConcreteNodeMut for $name {
-            fn as_mut_leaf(&mut self) -> Option<&mut dyn Leaf> {
-                Some(self)
+            fn as_mut_leaf(&mut self) -> Option<LeafRefMut<'_>> {
+                Some(LeafRefMut::Token(TokenRefMut::$name(self)))
             }
-            fn as_mut_token(&mut self) -> Option<&mut dyn Token> {
-                Some(self)
+            fn as_mut_token(&mut self) -> Option<TokenRefMut<'_>> {
+                Some(TokenRefMut::$name(self))
             }
         }
         impl Token for $name {
@@ -3488,7 +3651,7 @@ impl<'s> Populator<'s> {
     }
 
     // Overload for token fields.
-    fn visit_token(&mut self, token: &mut dyn Token) {
+    fn visit_token(&mut self, mut token: TokenRefMut<'_>) {
         if self.unsource_leaves() {
             *token.range_mut() = None;
             return;
@@ -3522,7 +3685,7 @@ impl<'s> Populator<'s> {
     }
 
     // Overload for keyword fields.
-    fn visit_keyword(&mut self, keyword: &mut dyn Keyword) -> VisitResult {
+    fn visit_keyword(&mut self, mut keyword: KeywordRefMut<'_>) -> VisitResult {
         if self.unsource_leaves() {
             *keyword.range_mut() = None;
             return VisitResult::Continue(());
