@@ -1,6 +1,6 @@
 // The fish parser. Contains functions for parsing and evaluating code.
 
-use crate::ast::{Ast, List, Node};
+use crate::ast::{Ast, ConcreteNode, List, Node};
 use crate::builtins::shared::STATUS_ILLEGAL_CMD;
 use crate::common::{
     escape_string, scoped_push_replacer, CancelChecker, EscapeFlags, EscapeStringStyle,
@@ -474,7 +474,8 @@ impl Parser {
         block_type: BlockType,
     ) -> EvalRes {
         assert!([BlockType::top, BlockType::subst].contains(&block_type));
-        let job_list = ps.ast.top().as_job_list().unwrap();
+        let top = ps.ast.top();
+        let job_list = top.as_job_list().unwrap();
         if !job_list.is_empty() {
             // Execute the top job list.
             self.eval_node(ps, job_list, io, job_group, block_type)
@@ -616,7 +617,8 @@ impl Parser {
 
         // Get the root argument list and extract arguments from it.
         let mut result = vec![];
-        let list = ast.top().as_freestanding_argument_list().unwrap();
+        let top = ast.top();
+        let list = top.as_freestanding_argument_list().unwrap();
         for arg in &list.arguments {
             let arg_src = arg.source(arg_list_src);
             if expand_string(arg_src.to_owned(), &mut result, flags, ctx, None)

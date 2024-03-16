@@ -14,7 +14,8 @@ use std::sync::atomic::Ordering;
 use libc::{LC_ALL, STDOUT_FILENO};
 
 use fish::ast::{
-    self, Ast, Category, Leaf, List, Node, NodeVisitor, SourceRangeList, Token, Traversal, Type,
+    self, Ast, Category, ConcreteNode, Leaf, List, Node, NodeEnumRef, NodeVisitor, SourceRangeList,
+    Token, Traversal, Type,
 };
 use fish::builtins::shared::{STATUS_CMD_ERROR, STATUS_CMD_OK};
 use fish::common::{
@@ -282,7 +283,7 @@ impl<'source, 'ast> PrettyPrinterState<'source, 'ast> {
     }
 
     // \return gap text flags for the gap text that comes *before* a given node type.
-    fn gap_text_flags_before_node(&self, node: &dyn Node) -> GapFlags {
+    fn gap_text_flags_before_node(&self, node: impl Node) -> GapFlags {
         let mut result = GapFlags::default();
         match node.typ() {
             // Allow escaped newlines before leaf nodes that can be part of a long command.
@@ -571,7 +572,7 @@ impl<'source, 'ast> PrettyPrinterState<'source, 'ast> {
         }
     }
 
-    fn emit_node_text(&mut self, node: &dyn Node) {
+    fn emit_node_text(&mut self, node: impl Node) {
         // Weird special-case: a token may end in an escaped newline. Notably, the newline is
         // not part of the following gap text, handle indentation here (#8197).
         let mut range = node.source_range();
@@ -617,7 +618,7 @@ impl<'source, 'ast> PrettyPrinterState<'source, 'ast> {
                 .binary_search(&range.start())
                 .is_ok();
 
-        self.emit_gap_text_before(range, self.gap_text_flags_before_node(node.as_node()));
+        self.emit_gap_text_before(range, self.gap_text_flags_before_node(node));
 
         // Don't emit anything if the gap text put us on a newline (because it had a comment).
         if !self.at_line_start() {
@@ -689,7 +690,7 @@ fn parse_flags() -> ParseTreeFlags {
 
 impl<'source, 'ast> NodeVisitor<'_> for PrettyPrinterState<'source, 'ast> {
     // Default implementation is to just visit children.
-    fn visit(&mut self, node: &'_ dyn Node) {
+    fn visit(&mut self, node: NodeEnumRef<'_>) {
         // Leaf nodes we just visit their text.
         if node.as_keyword().is_some() {
             self.emit_node_text(node);
@@ -715,13 +716,13 @@ impl<'source, 'ast> NodeVisitor<'_> for PrettyPrinterState<'source, 'ast> {
             }
             Type::begin_header => {
                 // 'begin' does not require a newline after it, but we insert one.
-                node.accept(self, false);
+                node.enum_accept(self, false);
                 self.visit_begin_header();
             }
             _ => {
                 // For branch and list nodes, default is to visit their children.
                 if [Category::branch, Category::list].contains(&node.category()) {
-                    node.accept(self, false);
+                    node.enum_accept(self, false);
                     return;
                 }
                 panic!("unexpected node type");

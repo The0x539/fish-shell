@@ -16,7 +16,7 @@
 //! 5. The chaos_mode boolean can be set to true to do things like lower buffer sizes which can
 //! trigger race conditions. This is useful for testing.
 
-use crate::{common::cstr2wcstring, env::EnvVar, wcstringutil::trim};
+use crate::{ast::ConcreteNode, common::cstr2wcstring, env::EnvVar, wcstringutil::trim};
 use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap, HashSet, VecDeque},

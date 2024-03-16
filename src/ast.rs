@@ -35,7 +35,7 @@ use std::ops::{ControlFlow, Index, IndexMut};
  *    node.accept(&mut v);
  */
 pub trait NodeVisitor<'a> {
-    fn visit(&mut self, node: &'a dyn Node);
+    fn visit(&mut self, node: NodeEnumRef<'a>);
 }
 
 #[enum_dispatch]
@@ -149,9 +149,11 @@ pub trait Node: Acceptor + ConcreteNode + std::fmt::Debug {
     fn pointer_eq(&self, rhs: &dyn Node) -> bool {
         std::ptr::eq(self.as_ptr(), rhs.as_ptr())
     }
-    fn as_node(&self) -> &dyn Node;
+
+    fn as_node(&self) -> NodeEnumRef<'_>;
 }
 
+#[allow(dead_code)]
 trait EnumVal: 'static {
     type Ref<'n>;
     type Mut<'n>;
@@ -160,28 +162,11 @@ trait EnumVal: 'static {
     fn to_mut<'n>(&'n mut self) -> Self::Mut<'n>;
 }
 
+#[allow(dead_code)]
 trait FromConcrete<T>: EnumVal {
     fn from_val(value: T) -> Self;
     fn from_ref<'n>(value: &'n T) -> Self::Ref<'n>;
     fn from_mut<'n>(value: &'n mut T) -> Self::Mut<'n>;
-}
-
-/// Extension trait to make FromConcrete easier to use
-trait AsEnum<T: EnumVal> {
-    fn into_enum(self) -> T;
-    fn as_enum<'n>(&'n self) -> T::Ref<'n>;
-    fn as_mut_enum<'n>(&'n mut self) -> T::Mut<'n>;
-}
-impl<N, E: EnumVal + FromConcrete<N>> AsEnum<E> for N {
-    fn into_enum(self) -> E {
-        E::from_val(self)
-    }
-    fn as_enum<'n>(&'n self) -> E::Ref<'n> {
-        E::from_ref(self)
-    }
-    fn as_mut_enum<'n>(&'n mut self) -> E::Mut<'n> {
-        E::from_mut(self)
-    }
 }
 
 macro_rules! impl_from_concrete {
@@ -379,6 +364,20 @@ macro_rules! define_node {
                 variant: $category,
             }
             $(
+                // impl FromConcrete<SwitchStatement> for BranchEnum
+                impl_from_concrete! {
+                    inner: $variant,
+                    outer: [<$category Enum>],
+                }
+                // impl FromConcrete<SwitchStatement> for NodeEnum
+                impl_from_concrete! {
+                    inner: $variant,
+                    outer: $node,
+                    middle: [<$category Enum>],
+                    variant: $category,
+                }
+            )*
+            $(
                 // impl FromConcrete<TokenEnum> for LeafEnum
                 impl_from_concrete! {
                     inner: [<$subcat Enum>],
@@ -557,10 +556,26 @@ macro_rules! define_node {
                 }
             }
         )*)*)*
+
+        impl<'a> [< $node Ref >] <'a> {
+            // Special case for some annoying lifetime problems. Should go away later.
+            pub fn enum_accept(self, visitor: &mut dyn NodeVisitor<'a>, reverse: bool) {
+                match self {
+                    $(Self::$category(x) => match x {
+                        $([<$category Ref>]::$variant(y) => y.accept(visitor, reverse),)*
+                        $([<$category Ref>]::$subcat(z) => match z {
+                            $([<$subcat Ref>]::$subvariant(w) => w.accept(visitor, reverse),)*
+                        },)*
+                    },)*
+                }
+            }
+        }
     }}
 }
 
 define_node! {
+    #[enum_dispatch(Acceptor, ConcreteNode, Node)]
+    #[derive(Debug)]
     pub enum NodeEnum;
 
     #[enum_dispatch]
@@ -731,7 +746,7 @@ impl<T: Node> Node for &T {
     fn as_ptr(&self) -> *const () {
         T::as_ptr(self)
     }
-    fn as_node(&self) -> &dyn Node {
+    fn as_node(&self) -> NodeEnumRef<'_> {
         T::as_node(self)
     }
 }
@@ -751,7 +766,7 @@ impl<T: Node> Node for &mut T {
     fn as_ptr(&self) -> *const () {
         T::as_ptr(self)
     }
-    fn as_node(&self) -> &dyn Node {
+    fn as_node(&self) -> NodeEnumRef<'_> {
         T::as_node(self)
     }
 }
@@ -857,7 +872,7 @@ macro_rules! implement_node {
                     total: SourceRange::new(0, 0),
                     any_unsourced: false,
                 };
-                visitor.visit(self);
+                visitor.visit(self.as_node());
                 if visitor.any_unsourced {
                     None
                 } else {
@@ -867,8 +882,8 @@ macro_rules! implement_node {
             fn as_ptr(&self) -> *const () {
                 (self as *const $name).cast()
             }
-            fn as_node(&self) -> &dyn Node {
-                self
+            fn as_node(&self) -> NodeEnumRef<'_> {
+                NodeEnum::from_ref(self)
             }
         }
         impl NodeMut for $name {}
@@ -1074,7 +1089,7 @@ macro_rules! accept_list_visitor_impl {
         $visitor:ident,
         visit,
         $child:expr) => {{
-        $visitor.visit(&$child);
+        $visitor.visit($child.as_node());
         VisitResult::Continue(())
     }};
     (
@@ -1236,7 +1251,7 @@ macro_rules! visit_1_field_impl {
 
 macro_rules! apply_borrow {
     ( visit, $expr:expr ) => {
-        &$expr
+        $expr.as_node()
     };
     ( visit_mut, $expr:expr ) => {
         &mut $expr
@@ -1282,7 +1297,7 @@ macro_rules! visit_optional_field {
         $visitor:ident
     ) => {
         match &$field {
-            Some(value) => $visitor.visit(&*value),
+            Some(value) => $visitor.visit(value.as_node()),
             None => visit_result!(visit),
         }
     };
@@ -2404,28 +2419,28 @@ pub fn ast_type_to_string(t: Type) -> &'static wstr {
 //    let tv = Traversal::new(start);
 //    while let Some(node) = tv.next() {...}
 pub struct Traversal<'a> {
-    stack: Vec<&'a dyn Node>,
+    stack: Vec<NodeEnumRef<'a>>,
 }
 
 impl<'a> Traversal<'a> {
     // Construct starting with a node
-    pub fn new(n: &'a dyn Node) -> Self {
+    pub fn new(n: NodeEnumRef<'a>) -> Self {
         Self { stack: vec![n] }
     }
 }
 
 impl<'a> Iterator for Traversal<'a> {
-    type Item = &'a dyn Node;
-    fn next(&mut self) -> Option<&'a dyn Node> {
+    type Item = NodeEnumRef<'a>;
+    fn next(&mut self) -> Option<NodeEnumRef<'a>> {
         let node = self.stack.pop()?;
         // We want to visit in reverse order so the first child ends up on top of the stack.
-        node.accept(self, true /* reverse */);
+        node.enum_accept(self, true /* reverse */);
         Some(node)
     }
 }
 
 impl<'a, 'v: 'a> NodeVisitor<'v> for Traversal<'a> {
-    fn visit(&mut self, node: &'a dyn Node) {
+    fn visit(&mut self, node: NodeEnumRef<'v>) {
         self.stack.push(node)
     }
 }
@@ -2489,10 +2504,10 @@ impl Ast {
     }
     /// \return a traversal, allowing iteration over the nodes.
     pub fn walk(&'_ self) -> Traversal<'_> {
-        Traversal::new(self.top.as_node())
+        Traversal::new(self.top())
     }
     /// \return the top node. This has the type requested in the 'parse' method.
-    pub fn top(&self) -> &dyn Node {
+    pub fn top(&self) -> NodeEnumRef<'_> {
         self.top.as_node()
     }
     fn top_mut(&mut self) -> &mut dyn NodeMut {
@@ -2509,7 +2524,7 @@ impl Ast {
         let mut result = WString::new();
 
         for node in self.walk() {
-            let depth = get_depth(node);
+            let depth = get_depth(&node);
             // dot-| padding
             result += &str::repeat("! ", depth)[..];
 
@@ -2575,7 +2590,7 @@ struct SourceRangeVisitor {
 }
 
 impl<'a> NodeVisitor<'a> for SourceRangeVisitor {
-    fn visit(&mut self, node: &'a dyn Node) {
+    fn visit(&mut self, node: NodeEnumRef<'a>) {
         match node.category() {
             Category::leaf => match node.as_leaf().unwrap().range() {
                 None => self.any_unsourced = true,

@@ -1,5 +1,7 @@
 //! Various mostly unrelated utility functions related to parsing, loading and evaluating fish code.
-use crate::ast::{self, Ast, Keyword, Leaf, List, Node, NodeVisitor, Token};
+use crate::ast::{
+    self, Ast, ConcreteNode, Keyword, Leaf, List, Node, NodeEnumRef, NodeVisitor, Token,
+};
 use crate::builtins::shared::builtin_exists;
 use crate::common::{
     escape_string, unescape_string, valid_var_name, valid_var_name_char, EscapeFlags,
@@ -907,7 +909,7 @@ impl<'a> IndentVisitor<'a> {
 }
 impl<'a> NodeVisitor<'a> for IndentVisitor<'a> {
     // Default implementation is to just visit children.
-    fn visit(&mut self, node: &'a dyn Node) {
+    fn visit(&mut self, node: NodeEnumRef<'a>) {
         let mut inc = 0;
         let mut dec = 0;
         use ast::{Category, Type};
@@ -1013,7 +1015,7 @@ impl<'a> NodeVisitor<'a> for IndentVisitor<'a> {
             self.last_indent = self.indent;
         }
 
-        node.accept(self, false);
+        node.enum_accept(self, false);
         self.indent -= dec;
     }
 }
@@ -1204,7 +1206,8 @@ pub fn parse_util_detect_errors_in_argument_list(
 
     // Get the root argument list and extract arguments from it.
     // Test each of these.
-    let args = &ast.top().as_freestanding_argument_list().unwrap().arguments;
+    let top = ast.top();
+    let args = &top.as_freestanding_argument_list().unwrap().arguments;
     for arg in args.iter() {
         let arg_src = arg.source(arg_list_src);
         if parse_util_detect_errors_in_argument(arg, arg_src, &mut Some(&mut errors)).is_err() {
