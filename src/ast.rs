@@ -158,15 +158,15 @@ trait EnumVal: 'static {
     type Ref<'n>;
     type Mut<'n>;
 
-    fn to_ref<'n>(&'n self) -> Self::Ref<'n>;
-    fn to_mut<'n>(&'n mut self) -> Self::Mut<'n>;
+    fn to_ref(&self) -> Self::Ref<'_>;
+    fn to_mut(&mut self) -> Self::Mut<'_>;
 }
 
 #[allow(dead_code)]
 trait FromConcrete<T>: EnumVal {
     fn from_val(value: T) -> Self;
-    fn from_ref<'n>(value: &'n T) -> Self::Ref<'n>;
-    fn from_mut<'n>(value: &'n mut T) -> Self::Mut<'n>;
+    fn from_ref(value: &T) -> Self::Ref<'_>;
+    fn from_mut(value: &mut T) -> Self::Mut<'_>;
 }
 
 macro_rules! impl_from_concrete {
@@ -261,13 +261,13 @@ macro_rules! define_node {
             type Ref<'n> = [< $node Ref >] <'n>;
             type Mut<'n> = [< $node RefMut >] <'n>;
 
-            fn to_ref<'n>(&'n self) -> Self::Ref<'n> {
+            fn to_ref(&self) -> Self::Ref<'_> {
                 match self {
                     $(Self::$category(x) => Self::Ref::$category(x.to_ref()),)*
                 }
             }
 
-            fn to_mut<'n>(&'n mut self) -> Self::Mut<'n> {
+            fn to_mut(&mut self) -> Self::Mut<'_> {
                 match self {
                     $(Self::$category(x) => Self::Mut::$category(x.to_mut()),)*
                 }
@@ -302,14 +302,14 @@ macro_rules! define_node {
                 type Ref<'n> = [< $category Ref >] <'n>;
                 type Mut<'n> = [< $category RefMut >] <'n>;
 
-                fn to_ref<'n>(&'n self) -> Self::Ref<'n> {
+                fn to_ref(&self) -> Self::Ref<'_> {
                     match self {
                         $(Self::$variant(x) => Self::Ref::$variant(x),)*
                         $(Self::$subcat(x) => Self::Ref::$subcat(x.to_ref()),)*
                     }
                 }
 
-                fn to_mut<'n>(&'n mut self) -> Self::Mut<'n> {
+                fn to_mut(&mut self) -> Self::Mut<'_> {
                     match self {
                         $(Self::$variant(x) => Self::Mut::$variant(x),)*
                         $(Self::$subcat(x) => Self::Mut::$subcat(x.to_mut()),)*
@@ -338,13 +338,13 @@ macro_rules! define_node {
                     type Ref<'n> = [< $subcat Ref >] <'n>;
                     type Mut<'n> = [< $subcat RefMut >] <'n>;
 
-                    fn to_ref<'n>(&'n self) -> Self::Ref<'n> {
+                    fn to_ref(&self) -> Self::Ref<'_> {
                         match self {
                             $(Self::$subvariant(x) => Self::Ref::$subvariant(x),)*
                         }
                     }
 
-                    fn to_mut<'n>(&'n mut self) -> Self::Mut<'n> {
+                    fn to_mut(&mut self) -> Self::Mut<'_> {
                         match self {
                             $(Self::$subvariant(x) => Self::Mut::$subvariant(x),)*
                         }
@@ -828,7 +828,7 @@ impl<T: Keyword> Keyword for &mut T {
 }
 impl<T: Token> Token for &T {
     fn token_type(&self) -> ParseTokenType {
-        T::token_type(&self)
+        T::token_type(self)
     }
     // TODO: make this unnecessary
     fn token_type_mut(&mut self) -> &mut ParseTokenType {
@@ -840,7 +840,7 @@ impl<T: Token> Token for &T {
 }
 impl<T: Token> Token for &mut T {
     fn token_type(&self) -> ParseTokenType {
-        T::token_type(&self)
+        T::token_type(self)
     }
     fn token_type_mut(&mut self) -> &mut ParseTokenType {
         T::token_type_mut(self)
