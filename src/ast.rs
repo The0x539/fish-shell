@@ -216,7 +216,12 @@ macro_rules! define_node {
         }
 
         $(
-            impl_downcast!($downcast, $downcast_mut, $category, $($variant),*);
+            impl_downcast!(
+                $downcast,
+                $downcast_mut,
+                $category,
+                $($variant),*
+            );
         )*
     }}
 }
@@ -227,7 +232,18 @@ macro_rules! impl_downcast {
         $downcast_mut:ident,
         LeafEnum,
         $($variant:ident),*
-    ) => {};
+    ) => {paste::paste!{
+        $(
+            impl $downcast for $variant {
+                fn as_leaf (&self) -> Option<&dyn Leaf> { Some(self) }
+                fn [< as_ $variant:snake >] (&self) -> Option<&Self> { Some(self) }
+            }
+            impl $downcast_mut for $variant {
+                fn as_mut_leaf (&mut self) -> Option<&mut dyn Leaf> { Some(self) }
+                fn [< as_mut_ $variant:snake >] (&mut self) -> Option<&mut Self> { Some(self) }
+            }
+        )*
+    }};
     (
         $downcast:ident,
         $downcast_mut:ident,
@@ -1501,22 +1517,6 @@ pub struct VariableAssignment {
 }
 implement_node!(VariableAssignment, leaf, variable_assignment);
 implement_leaf!(VariableAssignment);
-impl ConcreteNode for VariableAssignment {
-    fn as_leaf(&self) -> Option<&dyn Leaf> {
-        Some(self)
-    }
-    fn as_variable_assignment(&self) -> Option<&VariableAssignment> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for VariableAssignment {
-    fn as_mut_leaf(&mut self) -> Option<&mut dyn Leaf> {
-        Some(self)
-    }
-    fn as_mut_variable_assignment(&mut self) -> Option<&mut VariableAssignment> {
-        Some(self)
-    }
-}
 impl CheckParse for VariableAssignment {
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
         // Do we have a variable assignment at all?
@@ -1545,22 +1545,6 @@ pub struct MaybeNewlines {
 }
 implement_node!(MaybeNewlines, leaf, maybe_newlines);
 implement_leaf!(MaybeNewlines);
-impl ConcreteNode for MaybeNewlines {
-    fn as_leaf(&self) -> Option<&dyn Leaf> {
-        Some(self)
-    }
-    fn as_maybe_newlines(&self) -> Option<&MaybeNewlines> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for MaybeNewlines {
-    fn as_mut_leaf(&mut self) -> Option<&mut dyn Leaf> {
-        Some(self)
-    }
-    fn as_mut_maybe_newlines(&mut self) -> Option<&mut MaybeNewlines> {
-        Some(self)
-    }
-}
 
 /// An argument is just a node whose source range determines its contents.
 /// This is a separate type because it is sometimes useful to find all arguments.
@@ -1571,22 +1555,6 @@ pub struct Argument {
 }
 implement_node!(Argument, leaf, argument);
 implement_leaf!(Argument);
-impl ConcreteNode for Argument {
-    fn as_leaf(&self) -> Option<&dyn Leaf> {
-        Some(self)
-    }
-    fn as_argument(&self) -> Option<&Argument> {
-        Some(self)
-    }
-}
-impl ConcreteNodeMut for Argument {
-    fn as_mut_leaf(&mut self) -> Option<&mut dyn Leaf> {
-        Some(self)
-    }
-    fn as_mut_argument(&mut self) -> Option<&mut Argument> {
-        Some(self)
-    }
-}
 impl CheckParse for Argument {
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
         pop.peek_type(0) == ParseTokenType::string
