@@ -167,11 +167,13 @@ macro_rules! define_node {
         $downcast_mut_vis:vis trait $downcast_mut:ident;
 
         $(
+            $(#[$category_attr:meta])*
             pub enum $category:ident {
                 $($variant:ident,)*
                 $(@)?
                 $(
-                    pub enum $subcat_enum:ident : $subcat_trait:ident {
+                    $(#[$subcat_attr:meta])*
+                    pub enum $subcat:ident {
                         $($subvariant:ident,)*
                     }
                 )*
@@ -180,55 +182,105 @@ macro_rules! define_node {
     ) => {paste::paste!{
         $(#[$node_attr])*
         pub enum $node {
-            $($category($category),)*
+            $($category([< $category Enum >]),)*
         }
 
         $(
-            pub enum $category {
+            $(#[$category_attr])*
+            pub enum [< $category Enum >] {
                 $($variant($variant),)*
-                $($subcat_trait($subcat_enum),)*
+                $($subcat([< $subcat Enum >]),)*
+            }
+
+            $(#[$category_attr])*
+            #[derive(Copy, Clone)]
+            pub enum [< $category Ref >] <'n> {
+                $($variant(&'n $variant),)*
+                $($subcat( [< $subcat Ref >] <'n> ),)*
+            }
+
+            $(#[$category_attr])*
+            pub enum [< $category RefMut >] <'n> {
+                $($variant(&'n mut $variant),)*
+                $($subcat( [< $subcat RefMut >] <'n> ),)*
             }
 
             $(
-                pub enum $subcat_enum {
+                $(#[$subcat_attr])*
+                pub enum [< $subcat Enum >] {
                     $($subvariant($subvariant),)*
+                }
+
+                $(#[$subcat_attr])*
+                #[derive(Copy, Clone)]
+                pub enum [< $subcat Ref >] <'n> {
+                    $($subvariant(&'n $subvariant),)*
+                }
+
+                $(#[$subcat_attr])*
+                pub enum [< $subcat RefMut >] <'n> {
+                    $($subvariant(&'n mut $subvariant),)*
                 }
             )*
         )*
 
         $(#[$downcast_attr])*
         $downcast_vis trait $downcast {
-            fn as_leaf(&self) -> Option<LeafRef<'_>> { None }
-            fn as_keyword(&self) -> Option<KeywordRef<'_>> { None }
-            fn as_token(&self) -> Option<TokenRef<'_>> { None }
+            // as_branch, as_leaf, as_list
+            $(
+                fn [< as_ $category:snake >] (&self) -> Option< [< $category Ref >] <'_> > {
+                    None
+                }
+            )*
+
+            // as_keyword, as_token
+            $($(
+                fn [< as_ $subcat:snake >] (&self) -> Option< [< $subcat Ref >] <'_> > {
+                    None
+                }
+            )*)*
 
             $($(
-                fn [< as_ $variant:snake >] (&self) -> Option<&$variant> { None }
+                fn [< as_ $variant:snake >] (&self) -> Option<&$variant> {
+                    None
+                }
             )*)*
         }
 
         $(#[$downcast_mut_attr])*
         $downcast_mut_vis trait $downcast_mut {
-            fn as_mut_leaf(&mut self) -> Option<LeafRefMut<'_>> { None }
-            fn as_mut_keyword(&mut self) -> Option<KeywordRefMut<'_>> { None }
-            fn as_mut_token(&mut self) -> Option<TokenRefMut<'_>> { None }
+            // as_mut_branch, as_mut_leaf, as_mut_list
+            $(
+                fn [< as_mut_ $category:snake >] (&mut self) -> Option< [< $category RefMut >] <'_> > {
+                    None
+                }
+            )*
+
+            // as_mut_keyword, as_mut_token
+            $($(
+                fn [< as_mut_ $subcat:snake >] (&mut self) -> Option< [< $subcat RefMut >] <'_> > {
+                    None
+                }
+            )*)*
 
             $($(
-                fn [< as_mut_ $variant:snake >] (&mut self) -> Option<&mut $variant> { None }
+                fn [< as_mut_ $variant:snake >] (&mut self) -> Option<&mut $variant> {
+                    None
+                }
             )*)*
         }
 
         impl<T: $downcast> $downcast for &T {
-            fn as_leaf(&self) -> Option<LeafRef<'_>> {
-                T::as_leaf(self)
-            }
-            fn as_keyword(&self) -> Option<KeywordRef<'_>> {
-                T::as_keyword(self)
-            }
-            fn as_token(&self) -> Option<TokenRef<'_>> {
-                T::as_token(self)
-            }
-
+            $(
+                fn [< as_ $category:snake >] (&self) -> Option< [< $category Ref >] <'_> > {
+                    T::[< as_ $category:snake >](self)
+                }
+            )*
+            $($(
+                fn [< as_ $subcat:snake >] (&self) -> Option< [< $subcat Ref >] <'_> > {
+                    T::[< as_ $subcat:snake >](self)
+                }
+            )*)*
             $($(
                 fn [< as_ $variant:snake >] (&self) -> Option<&$variant> {
                     T::[< as_ $variant:snake >](self)
@@ -236,16 +288,16 @@ macro_rules! define_node {
             )*)*
         }
         impl<T: $downcast> $downcast for &mut T {
-            fn as_leaf(&self) -> Option<LeafRef<'_>> {
-                T::as_leaf(self)
-            }
-            fn as_keyword(&self) -> Option<KeywordRef<'_>> {
-                T::as_keyword(self)
-            }
-            fn as_token(&self) -> Option<TokenRef<'_>> {
-                T::as_token(self)
-            }
-
+            $(
+                fn [< as_ $category:snake >] (&self) -> Option< [< $category Ref >] <'_> > {
+                    T::[< as_ $category:snake >](self)
+                }
+            )*
+            $($(
+                fn [< as_ $subcat:snake >] (&self) -> Option< [< $subcat Ref >] <'_> > {
+                    T::[< as_ $subcat:snake >](self)
+                }
+            )*)*
             $($(
                 fn [< as_ $variant:snake >] (&self) -> Option<&$variant> {
                     T::[< as_ $variant:snake >](self)
@@ -253,16 +305,16 @@ macro_rules! define_node {
             )*)*
         }
         impl<T: $downcast_mut> $downcast_mut for &mut T {
-            fn as_mut_leaf(&mut self) -> Option<LeafRefMut<'_>> {
-                T::as_mut_leaf(&mut *self)
-            }
-            fn as_mut_keyword(&mut self) -> Option<KeywordRefMut<'_>> {
-                T::as_mut_keyword(&mut *self)
-            }
-            fn as_mut_token(&mut self) -> Option<TokenRefMut<'_>> {
-                T::as_mut_token(&mut *self)
-            }
-
+            $(
+                fn [< as_mut_ $category:snake >] (&mut self) -> Option< [< $category RefMut >] <'_> > {
+                    T::[< as_mut_ $category:snake >](self)
+                }
+            )*
+            $($(
+                fn [< as_mut_ $subcat:snake >] (&mut self) -> Option< [< $subcat RefMut >] <'_> > {
+                    T::[< as_mut_ $subcat:snake >](self)
+                }
+            )*)*
             $($(
                 fn [< as_mut_ $variant:snake >] (&mut self) -> Option<&mut $variant> {
                     T::[< as_mut_ $variant:snake >](self)
@@ -270,134 +322,64 @@ macro_rules! define_node {
             )*)*
         }
 
-        $(
-            impl_downcast!(
-                $downcast,
-                $downcast_mut,
-                $category,
-                $($variant),*
-                $(@ $subcat_trait $($subvariant)*),*
-            );
-        )*
-    }}
-}
-
-macro_rules! impl_downcast {
-    (
-        $downcast:ident,
-        $downcast_mut:ident,
-        LeafEnum,
-        $($variant:ident),*
-        $(@ $subcat:ident $($subvariant:ident)*),*
-    ) => {paste::paste!{
-        $(
+        $($(
             impl $downcast for $variant {
-                fn as_leaf (&self) -> Option<LeafRef<'_>> {
-                    Some(LeafRef::$variant(self))
-                }
-                fn [< as_ $variant:snake >] (&self) -> Option<&Self> { Some(self) }
-            }
-            impl $downcast_mut for $variant {
-                fn as_mut_leaf (&mut self) -> Option<LeafRefMut<'_>> {
-                    Some(LeafRefMut::$variant(self))
-                }
-                fn [< as_mut_ $variant:snake >] (&mut self) -> Option<&mut Self> { Some(self) }
-            }
-        )*
-
-        #[enum_dispatch(Acceptor, Node, Leaf)]
-        #[derive(Debug, Copy, Clone)]
-        pub enum LeafRef<'n> {
-            $($variant(&'n $variant),)*
-            $($subcat( [< $subcat Ref >] <'n> ),)*
-        }
-
-        #[enum_dispatch(Acceptor, Node, Leaf)]
-        #[derive(Debug)]
-        pub enum LeafRefMut<'n> {
-            $($variant(&'n mut $variant),)*
-            $($subcat( [< $subcat RefMut >] <'n> ),)*
-        }
-
-        $(
-            #[enum_dispatch(Acceptor, Node, Leaf, $subcat)]
-            #[derive(Debug, Copy, Clone)]
-            pub enum [< $subcat Ref >] <'n> {
-                $($subvariant(&'n $subvariant)),*
-            }
-
-            #[enum_dispatch(Acceptor, Node, Leaf, $subcat)]
-            #[derive(Debug)]
-            pub enum [< $subcat RefMut >] <'n> {
-                $($subvariant(&'n mut $subvariant)),*
-            }
-
-            // This gives us a scope in which we can use some much-needed type aliases,
-            // at the cost of nesting.
-            const _: () = {
-                type Ref<'a> = [< $subcat Ref >] <'a>;
-                type RefMut<'a> = [< $subcat RefMut >] <'a>;
-
-                impl $downcast for Ref<'_> {
-                    fn as_leaf(&self) -> Option<LeafRef<'_>> {
-                        Some(LeafRef::$subcat(*self))
-                    }
-                    fn [< as_ $subcat:snake >] (&self) -> Option<Ref<'_>> {
-                        Some(*self)
-                    }
+                fn [< as_ $category:snake >] (&self) -> Option< [< $category Ref >] <'_> > {
+                    Some([< $category Ref >]::$variant(self))
                 }
 
-                impl $downcast for RefMut<'_> {
-                    fn as_leaf(&self) -> Option<LeafRef<'_>> {
-                        self.[< as_ $subcat:snake >]().map(LeafRef::$subcat)
-                    }
-
-                    fn [< as_ $subcat:snake >] (&self) -> Option<Ref<'_>> {
-                        match self {
-                            $(Self::$subvariant(x) => Some(Ref::$subvariant(&*x))),*
-                        }
-                    }
+                fn [< as_ $variant:snake >] (&self) -> Option<&Self> {
+                    Some(self)
                 }
-
-                impl $downcast_mut for RefMut<'_> {
-                    fn as_mut_leaf(&mut self) -> Option<LeafRefMut<'_>> {
-                        self.[< as_mut_ $subcat:snake >]().map(LeafRefMut::$subcat)
-                    }
-                    fn [< as_mut_ $subcat:snake >] (&mut self) -> Option<RefMut<'_>> {
-                        match self {
-                            $(Self::$subvariant(x) => Some(RefMut::$subvariant(&mut *x))),*
-                        }
-                    }
-                }
-            };
-        )*
-    }};
-    (
-        $downcast:ident,
-        $downcast_mut:ident,
-        $category:ident,
-        $($variant:ident),*
-    ) => {paste::paste!{
-        $(
-            impl $downcast for $variant {
-                fn [< as_ $variant:snake >] (&self) -> Option<&Self> { Some(self) }
             }
 
             impl $downcast_mut for $variant {
-                fn [< as_mut_ $variant:snake >] (&mut self) -> Option<&mut Self> { Some(self) }
+                fn [< as_mut_ $category:snake >] (&mut self) -> Option< [< $category RefMut >] <'_> > {
+                    Some([< $category RefMut >]::$variant(self))
+                }
+
+                fn [< as_mut_ $variant:snake >] (&mut self) -> Option<&mut Self> {
+                    Some(self)
+                }
             }
-        )*
+        )*)*
+
+        $($($(
+            impl $downcast for $subvariant {
+                fn [< as_ $category:snake >] (&self) -> Option< [< $category Ref >] <'_> > {
+                    Some([< $category Ref >]::$subcat([< $subcat Ref >]::$subvariant(self)))
+                }
+
+                fn [< as_ $subcat:snake >] (&self) -> Option< [< $subcat Ref >] <'_> > {
+                    Some([< $subcat Ref >]::$subvariant(self))
+                }
+            }
+
+            impl $downcast_mut for $subvariant {
+                fn [< as_mut_ $category:snake >] (&mut self) -> Option< [< $category RefMut >] <'_> > {
+                    Some([< $category RefMut >]::$subcat([< $subcat RefMut >]::$subvariant(self)))
+                }
+
+                fn [< as_mut_ $subcat:snake >] (&mut self) -> Option< [< $subcat RefMut >] <'_> > {
+                    Some([< $subcat RefMut >]::$subvariant(self))
+                }
+            }
+        )*)*)*
     }}
 }
 
 define_node! {
     pub enum NodeEnum;
 
+    #[enum_dispatch]
     pub trait ConcreteNode;
 
     #[allow(dead_code)]
+    #[enum_dispatch]
     trait ConcreteNodeMut;
 
+    #[enum_dispatch(Acceptor, ConcreteNode, Node)]
+    #[derive(Debug)]
     pub enum Branch {
         Redirection,
         ArgumentOrRedirection,
@@ -423,12 +405,16 @@ define_node! {
         FreestandingArgumentList,
     }
 
-    pub enum LeafEnum {
+    #[enum_dispatch(Acceptor, ConcreteNode, Node, Leaf)]
+    #[derive(Debug)]
+    pub enum Leaf {
         VariableAssignment,
         MaybeNewlines,
         Argument,
         @
-        pub enum KeywordEnum: Keyword {
+        #[enum_dispatch(Acceptor, ConcreteNode, Node, Leaf, Keyword)]
+        #[derive(Debug)]
+        pub enum Keyword {
             DecoratedStatementDecorator,
             JobConjunctionDecorator,
             KeywordBegin,
@@ -444,7 +430,9 @@ define_node! {
             KeywordTime,
             KeywordWhile,
         }
-        pub enum TokenEnum: Token {
+        #[enum_dispatch(Acceptor, ConcreteNode, Node, Leaf, Token)]
+        #[derive(Debug)]
+        pub enum Token {
             SemiNl,
             String_,
             TokenBackground,
@@ -454,7 +442,9 @@ define_node! {
         }
     }
 
-    pub enum ListEnum {
+    #[enum_dispatch(Acceptor, ConcreteNode, Node)]
+    #[derive(Debug)]
+    pub enum List {
         VariableAssignmentList,
         ArgumentOrRedirectionList,
         ElseifClauseList,
@@ -464,52 +454,6 @@ define_node! {
         ArgumentList,
         JobList,
         CaseItemList,
-    }
-}
-
-impl ConcreteNode for LeafRef<'_> {
-    fn as_leaf(&self) -> Option<LeafRef<'_>> {
-        Some(*self)
-    }
-    fn as_token(&self) -> Option<TokenRef<'_>> {
-        if let Self::Token(t) = self {
-            Some(*t)
-        } else {
-            None
-        }
-    }
-    fn as_keyword(&self) -> Option<KeywordRef<'_>> {
-        if let Self::Keyword(k) = self {
-            Some(*k)
-        } else {
-            None
-        }
-    }
-}
-
-impl ConcreteNode for LeafRefMut<'_> {
-    fn as_leaf(&self) -> Option<LeafRef<'_>> {
-        Some(match self {
-            Self::VariableAssignment(x) => LeafRef::VariableAssignment(x),
-            Self::MaybeNewlines(x) => LeafRef::MaybeNewlines(x),
-            Self::Argument(x) => LeafRef::Argument(x),
-            Self::Keyword(x) => LeafRef::Keyword(x.as_keyword()?),
-            Self::Token(x) => LeafRef::Token(x.as_token()?),
-        })
-    }
-    fn as_token(&self) -> Option<TokenRef<'_>> {
-        if let Self::Token(t) = self {
-            t.as_token()
-        } else {
-            None
-        }
-    }
-    fn as_keyword(&self) -> Option<KeywordRef<'_>> {
-        if let Self::Keyword(k) = self {
-            k.as_keyword()
-        } else {
-            None
-        }
     }
 }
 
@@ -782,22 +726,6 @@ macro_rules! define_keyword_node {
         }
         implement_node!($name, leaf, keyword_base);
         implement_leaf!($name);
-        impl ConcreteNode for $name {
-            fn as_leaf(&self) -> Option<LeafRef<'_>> {
-                Some(LeafRef::Keyword(KeywordRef::$name(self)))
-            }
-            fn as_keyword(&self) -> Option<KeywordRef<'_>> {
-                Some(KeywordRef::$name(self))
-            }
-        }
-        impl ConcreteNodeMut for $name {
-            fn as_mut_leaf(&mut self) -> Option<LeafRefMut<'_>> {
-                Some(LeafRefMut::Keyword(KeywordRefMut::$name(self)))
-            }
-            fn as_mut_keyword(&mut self) -> Option<KeywordRefMut<'_>> {
-                Some(KeywordRefMut::$name(self))
-            }
-        }
         impl Keyword for $name {
             fn keyword(&self) -> ParseKeyword {
                 self.keyword
@@ -823,22 +751,6 @@ macro_rules! define_token_node {
         }
         implement_node!($name, leaf, token_base);
         implement_leaf!($name);
-        impl ConcreteNode for $name {
-            fn as_leaf(&self) -> Option<LeafRef<'_>> {
-                Some(LeafRef::Token(TokenRef::$name(self)))
-            }
-            fn as_token(&self) -> Option<TokenRef<'_>> {
-                Some(TokenRef::$name(self))
-            }
-        }
-        impl ConcreteNodeMut for $name {
-            fn as_mut_leaf(&mut self) -> Option<LeafRefMut<'_>> {
-                Some(LeafRefMut::Token(TokenRefMut::$name(self)))
-            }
-            fn as_mut_token(&mut self) -> Option<TokenRefMut<'_>> {
-                Some(TokenRefMut::$name(self))
-            }
-        }
         impl Token for $name {
             fn token_type(&self) -> ParseTokenType {
                 self.parse_token_type
