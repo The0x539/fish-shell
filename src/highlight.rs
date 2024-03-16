@@ -1088,7 +1088,7 @@ impl<'s> Highlighter<'s> {
         node.accept(self, false);
     }
     // AST visitor implementations.
-    fn visit_keyword(&mut self, node: &dyn Keyword) {
+    fn visit_keyword(&mut self, node: impl Keyword) {
         let mut role = HighlightRole::normal;
         match node.keyword() {
             ParseKeyword::kw_begin
@@ -1113,7 +1113,7 @@ impl<'s> Highlighter<'s> {
         };
         self.color_node(node.leaf_as_node(), HighlightSpec::with_fg(role));
     }
-    fn visit_token(&mut self, tok: &dyn Token) {
+    fn visit_token(&mut self, tok: impl Token) {
         let mut role = HighlightRole::normal;
         match tok.token_type() {
             ParseTokenType::end | ParseTokenType::pipe | ParseTokenType::background => {

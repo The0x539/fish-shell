@@ -24,6 +24,7 @@ use crate::tokenizer::{
     TOK_ACCEPT_UNFINISHED, TOK_CONTINUE_AFTER_ERROR, TOK_SHOW_COMMENTS,
 };
 use crate::wchar::prelude::*;
+use enum_dispatch::enum_dispatch;
 use std::ops::{ControlFlow, Index, IndexMut};
 
 /**
@@ -37,6 +38,7 @@ pub trait NodeVisitor<'a> {
     fn visit(&mut self, node: &'a dyn Node);
 }
 
+#[enum_dispatch]
 pub trait Acceptor {
     fn accept<'a>(&'a self, visitor: &mut dyn NodeVisitor<'a>, reversed: bool);
 }
@@ -98,6 +100,7 @@ impl<T: AcceptorMut> AcceptorMut for Option<T> {
 }
 
 /// Node is the base trait of all AST nodes.
+#[enum_dispatch]
 pub trait Node: Acceptor + ConcreteNode + std::fmt::Debug {
     /// The parent node, or null if this is root.
     fn parent(&self) -> Option<&dyn Node>;
@@ -168,7 +171,7 @@ macro_rules! define_node {
                 $($variant:ident,)*
                 $(@)?
                 $(
-                    pub enum $subcategory:ident {
+                    pub enum $subcat_enum:ident : $subcat_trait:ident {
                         $($subvariant:ident,)*
                     }
                 )*
@@ -183,11 +186,11 @@ macro_rules! define_node {
         $(
             pub enum $category {
                 $($variant($variant),)*
-                $($subcategory($subcategory),)*
+                $($subcat_trait($subcat_enum),)*
             }
 
             $(
-                pub enum $subcategory {
+                pub enum $subcat_enum {
                     $($subvariant($subvariant),)*
                 }
             )*
@@ -195,9 +198,9 @@ macro_rules! define_node {
 
         $(#[$downcast_attr])*
         $downcast_vis trait $downcast {
-            fn as_leaf(&self) -> Option<&dyn Leaf> { None }
-            fn as_keyword(&self) -> Option<&dyn Keyword> { None }
-            fn as_token(&self) -> Option<&dyn Token> { None }
+            fn as_leaf(&self) -> Option<LeafRef<'_>> { None }
+            fn as_keyword(&self) -> Option<KeywordRef<'_>> { None }
+            fn as_token(&self) -> Option<TokenRef<'_>> { None }
 
             $($(
                 fn [< as_ $variant:snake >] (&self) -> Option<&$variant> { None }
@@ -215,12 +218,31 @@ macro_rules! define_node {
             )*)*
         }
 
+        impl<T: $downcast> $downcast for &T {
+            fn as_leaf(&self) -> Option<LeafRef<'_>> {
+                T::as_leaf(self)
+            }
+            fn as_keyword(&self) -> Option<KeywordRef<'_>> {
+                T::as_keyword(self)
+            }
+            fn as_token(&self) -> Option<TokenRef<'_>> {
+                T::as_token(self)
+            }
+
+            $($(
+                fn [< as_ $variant:snake >] (&self) -> Option<&$variant> {
+                    T::[< as_ $variant:snake >](self)
+                }
+            )*)*
+        }
+
         $(
             impl_downcast!(
                 $downcast,
                 $downcast_mut,
                 $category,
                 $($variant),*
+                $(@ $subcat_trait $($subvariant)*),*
             );
         )*
     }}
@@ -232,15 +254,42 @@ macro_rules! impl_downcast {
         $downcast_mut:ident,
         LeafEnum,
         $($variant:ident),*
+        $(@ $subcat:ident $($subvariant:ident)*),*
     ) => {paste::paste!{
         $(
             impl $downcast for $variant {
-                fn as_leaf (&self) -> Option<&dyn Leaf> { Some(self) }
+                fn as_leaf (&self) -> Option<LeafRef<'_>> {
+                    Some(LeafRef::$variant(self))
+                }
                 fn [< as_ $variant:snake >] (&self) -> Option<&Self> { Some(self) }
             }
             impl $downcast_mut for $variant {
                 fn as_mut_leaf (&mut self) -> Option<&mut dyn Leaf> { Some(self) }
                 fn [< as_mut_ $variant:snake >] (&mut self) -> Option<&mut Self> { Some(self) }
+            }
+        )*
+
+        #[enum_dispatch(Acceptor, Node, Leaf)]
+        #[derive(Debug, Copy, Clone)]
+        pub enum LeafRef<'n> {
+            $($variant(&'n $variant),)*
+            $($subcat( [< $subcat Ref >] <'n> ),)*
+        }
+
+        $(
+            #[enum_dispatch(Acceptor, Node, Leaf, $subcat)]
+            #[derive(Debug, Copy, Clone)]
+            pub enum [< $subcat Ref >] <'n> {
+                $($subvariant(&'n $subvariant)),*
+            }
+
+            impl $downcast for [< $subcat Ref >] <'_> {
+                fn as_leaf(&self) -> Option<LeafRef<'_>> {
+                    Some(LeafRef::$subcat(*self))
+                }
+                fn [< as_ $subcat:snake >] (&self) -> Option<Self> {
+                    Some(*self)
+                }
             }
         )*
     }};
@@ -300,7 +349,7 @@ define_node! {
         MaybeNewlines,
         Argument,
         @
-        pub enum KeywordEnum {
+        pub enum KeywordEnum: Keyword {
             DecoratedStatementDecorator,
             JobConjunctionDecorator,
             KeywordBegin,
@@ -316,7 +365,7 @@ define_node! {
             KeywordTime,
             KeywordWhile,
         }
-        pub enum TokenEnum {
+        pub enum TokenEnum: Token {
             SemiNl,
             String_,
             TokenBackground,
@@ -339,7 +388,28 @@ define_node! {
     }
 }
 
+impl ConcreteNode for LeafRef<'_> {
+    fn as_leaf(&self) -> Option<LeafRef<'_>> {
+        Some(*self)
+    }
+    fn as_token(&self) -> Option<TokenRef<'_>> {
+        if let Self::Token(t) = self {
+            Some(*t)
+        } else {
+            None
+        }
+    }
+    fn as_keyword(&self) -> Option<KeywordRef<'_>> {
+        if let Self::Keyword(k) = self {
+            Some(*k)
+        } else {
+            None
+        }
+    }
+}
+
 /// Trait for all "leaf" nodes: nodes with no ast children.
+#[enum_dispatch]
 pub trait Leaf: Node {
     /// Returns none if this node is "unsourced." This happens if for whatever reason we are
     /// unable to parse the node, either because we had a parse error and recovered, or because
@@ -353,6 +423,7 @@ pub trait Leaf: Node {
 }
 
 // A token node is a node which contains a token, which must be one of a fixed set.
+#[enum_dispatch]
 pub trait Token: Leaf {
     /// The token type which was parsed.
     fn token_type(&self) -> ParseTokenType;
@@ -365,6 +436,7 @@ pub trait Token: Leaf {
 }
 
 /// A keyword node is a node which contains a keyword, which must be one of a fixed set.
+#[enum_dispatch]
 pub trait Keyword: Leaf {
     fn keyword(&self) -> ParseKeyword;
     fn keyword_mut(&mut self) -> &mut ParseKeyword;
@@ -400,6 +472,68 @@ pub trait List: Node {
 trait CheckParse {
     /// A true return means we should descend into the production, false means stop.
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool;
+}
+
+impl<T: Node> Node for &T {
+    fn parent(&self) -> Option<&dyn Node> {
+        T::parent(self)
+    }
+    fn typ(&self) -> Type {
+        T::typ(self)
+    }
+    fn category(&self) -> Category {
+        T::category(self)
+    }
+    fn try_source_range(&self) -> Option<SourceRange> {
+        T::try_source_range(self)
+    }
+    fn as_ptr(&self) -> *const () {
+        T::as_ptr(self)
+    }
+    fn as_node(&self) -> &dyn Node {
+        T::as_node(self)
+    }
+}
+impl<T: Acceptor> Acceptor for &T {
+    fn accept<'a>(&'a self, visitor: &mut dyn NodeVisitor<'a>, reversed: bool) {
+        T::accept(self, visitor, reversed)
+    }
+}
+impl<T: Leaf> Leaf for &T {
+    fn range(&self) -> Option<SourceRange> {
+        T::range(self)
+    }
+    // TODO: make this unnecessary
+    fn range_mut(&mut self) -> &mut Option<SourceRange> {
+        unimplemented!()
+    }
+    fn leaf_as_node(&self) -> &dyn Node {
+        T::leaf_as_node(self)
+    }
+}
+impl<T: Keyword> Keyword for &T {
+    fn keyword(&self) -> ParseKeyword {
+        T::keyword(self)
+    }
+    // TODO: make this unnecessary
+    fn keyword_mut(&mut self) -> &mut ParseKeyword {
+        unimplemented!()
+    }
+    fn allowed_keywords(&self) -> &'static [ParseKeyword] {
+        T::allowed_keywords(self)
+    }
+}
+impl<T: Token> Token for &T {
+    fn token_type(&self) -> ParseTokenType {
+        T::token_type(&self)
+    }
+    // TODO: make this unnecessary
+    fn token_type_mut(&mut self) -> &mut ParseTokenType {
+        unimplemented!()
+    }
+    fn allowed_tokens(&self) -> &'static [ParseTokenType] {
+        T::allowed_tokens(self)
+    }
 }
 
 /// Implement the node trait.
@@ -486,11 +620,11 @@ macro_rules! define_keyword_node {
         implement_node!($name, leaf, keyword_base);
         implement_leaf!($name);
         impl ConcreteNode for $name {
-            fn as_leaf(&self) -> Option<&dyn Leaf> {
-                Some(self)
+            fn as_leaf(&self) -> Option<LeafRef<'_>> {
+                Some(LeafRef::Keyword(KeywordRef::$name(self)))
             }
-            fn as_keyword(&self) -> Option<&dyn Keyword> {
-                Some(self)
+            fn as_keyword(&self) -> Option<KeywordRef<'_>> {
+                Some(KeywordRef::$name(self))
             }
         }
         impl ConcreteNodeMut for $name {
@@ -527,11 +661,11 @@ macro_rules! define_token_node {
         implement_node!($name, leaf, token_base);
         implement_leaf!($name);
         impl ConcreteNode for $name {
-            fn as_leaf(&self) -> Option<&dyn Leaf> {
-                Some(self)
+            fn as_leaf(&self) -> Option<LeafRef<'_>> {
+                Some(LeafRef::Token(TokenRef::$name(self)))
             }
-            fn as_token(&self) -> Option<&dyn Token> {
-                Some(self)
+            fn as_token(&self) -> Option<TokenRef<'_>> {
+                Some(TokenRef::$name(self))
             }
         }
         impl ConcreteNodeMut for $name {
@@ -1630,7 +1764,6 @@ impl DecoratedStatement {
         let Some(decorator) = &self.opt_decoration else {
             return StatementDecoration::none;
         };
-        let decorator: &dyn Keyword = decorator;
         match decorator.keyword() {
             ParseKeyword::kw_command => StatementDecoration::command,
             ParseKeyword::kw_builtin => StatementDecoration::builtin,

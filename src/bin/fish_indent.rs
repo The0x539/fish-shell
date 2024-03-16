@@ -14,7 +14,7 @@ use std::sync::atomic::Ordering;
 use libc::{LC_ALL, STDOUT_FILENO};
 
 use fish::ast::{
-    self, Ast, Category, Leaf, List, Node, NodeVisitor, SourceRangeList, Traversal, Type,
+    self, Ast, Category, Leaf, List, Node, NodeVisitor, SourceRangeList, Token, Traversal, Type,
 };
 use fish::builtins::shared::{STATUS_CMD_ERROR, STATUS_CMD_OK};
 use fish::common::{
@@ -603,7 +603,7 @@ impl<'source, 'ast> PrettyPrinterState<'source, 'ast> {
         self.output.push(';');
     }
 
-    fn visit_semi_nl(&mut self, node: &dyn ast::Token) {
+    fn visit_semi_nl(&mut self, node: impl ast::Token) {
         // These are semicolons or newlines which are part of the ast. That means it includes e.g.
         // ones terminating a job or 'if' header, but not random semis in job lists. We respect
         // preferred_semi_locations to decide whether or not these should stay as newlines or
