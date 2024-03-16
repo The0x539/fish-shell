@@ -40,11 +40,13 @@ pub trait NodeVisitor<'a> {
 
 #[enum_dispatch]
 pub trait Acceptor {
-    fn accept<'a>(&'a self, visitor: &mut dyn NodeVisitor<'a>, reversed: bool);
+    fn accept<'a>(&'a self, visitor: &mut impl NodeVisitor<'a>, reversed: bool)
+    where
+        Self: Sized;
 }
 
 impl<T: Acceptor> Acceptor for Option<T> {
-    fn accept<'a>(&'a self, visitor: &mut dyn NodeVisitor<'a>, reversed: bool) {
+    fn accept<'a>(&'a self, visitor: &mut impl NodeVisitor<'a>, reversed: bool) {
         match self {
             Some(node) => node.accept(visitor, reversed),
             None => (),
@@ -532,7 +534,7 @@ macro_rules! define_node {
 
         impl<'a> [< $node Ref >] <'a> {
             // Special case for some annoying lifetime problems. Should go away later.
-            pub fn enum_accept(self, visitor: &mut dyn NodeVisitor<'a>, reverse: bool) {
+            pub fn enum_accept(self, visitor: &mut impl NodeVisitor<'a>, reverse: bool) {
                 match self {
                     $(Self::$category(x) => match x {
                         $([<$category Ref>]::$variant(y) => y.accept(visitor, reverse),)*
@@ -744,12 +746,12 @@ impl<T: Node> Node for &mut T {
     }
 }
 impl<T: Acceptor> Acceptor for &T {
-    fn accept<'a>(&'a self, visitor: &mut dyn NodeVisitor<'a>, reversed: bool) {
+    fn accept<'a>(&'a self, visitor: &mut impl NodeVisitor<'a>, reversed: bool) {
         T::accept(self, visitor, reversed)
     }
 }
 impl<T: Acceptor> Acceptor for &mut T {
-    fn accept<'a>(&'a self, visitor: &mut dyn NodeVisitor<'a>, reversed: bool) {
+    fn accept<'a>(&'a self, visitor: &mut impl NodeVisitor<'a>, reversed: bool) {
         T::accept(self, visitor, reversed)
     }
 }
@@ -879,7 +881,7 @@ macro_rules! implement_leaf {
         }
         impl Acceptor for $name {
             #[allow(unused_variables)]
-            fn accept<'a>(&'a self, visitor: &mut dyn NodeVisitor<'a>, reversed: bool) {}
+            fn accept<'a>(&'a self, visitor: &mut impl NodeVisitor<'a>, reversed: bool) {}
         }
         impl AcceptorMut for $name {
             #[allow(unused_variables)]
@@ -996,7 +998,7 @@ macro_rules! define_list_node {
         }
         impl Acceptor for $name {
             #[allow(unused_variables)]
-            fn accept<'a>(&'a self, visitor: &mut dyn NodeVisitor<'a>, reversed: bool) {
+            fn accept<'a>(&'a self, visitor: &mut impl NodeVisitor<'a>, reversed: bool) {
                 accept_list_visitor!(Self, accept, visit, self, visitor, reversed, $contents);
             }
         }
@@ -1083,7 +1085,7 @@ macro_rules! implement_acceptor_for_branch {
     ) => {
         impl Acceptor for $name {
             #[allow(unused_variables)]
-            fn accept<'a>(&'a self, visitor: &mut dyn NodeVisitor<'a>, reversed: bool){
+            fn accept<'a>(&'a self, visitor: &mut impl NodeVisitor<'a>, reversed: bool){
                 visitor_accept_field!(
                     Self,
                     accept,
@@ -2041,7 +2043,7 @@ impl Default for ArgumentOrRedirectionVariant {
 }
 
 impl Acceptor for ArgumentOrRedirectionVariant {
-    fn accept<'a>(&'a self, visitor: &mut dyn NodeVisitor<'a>, reversed: bool) {
+    fn accept<'a>(&'a self, visitor: &mut impl NodeVisitor<'a>, reversed: bool) {
         match self {
             ArgumentOrRedirectionVariant::Argument(child) => child.accept(visitor, reversed),
             ArgumentOrRedirectionVariant::Redirection(child) => child.accept(visitor, reversed),
@@ -2131,7 +2133,7 @@ impl Default for StatementVariant {
 }
 
 impl Acceptor for StatementVariant {
-    fn accept<'a>(&'a self, visitor: &mut dyn NodeVisitor<'a>, reversed: bool) {
+    fn accept<'a>(&'a self, visitor: &mut impl NodeVisitor<'a>, reversed: bool) {
         match self {
             StatementVariant::None => panic!("cannot visit null statement"),
             StatementVariant::NotStatement(node) => node.accept(visitor, reversed),
@@ -2252,7 +2254,7 @@ impl Default for BlockStatementHeaderVariant {
 }
 
 impl Acceptor for BlockStatementHeaderVariant {
-    fn accept<'a>(&'a self, visitor: &mut dyn NodeVisitor<'a>, reversed: bool) {
+    fn accept<'a>(&'a self, visitor: &mut impl NodeVisitor<'a>, reversed: bool) {
         match self {
             BlockStatementHeaderVariant::None => panic!("cannot visit null block header"),
             BlockStatementHeaderVariant::ForHeader(node) => node.accept(visitor, reversed),
