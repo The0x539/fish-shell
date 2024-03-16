@@ -152,6 +152,82 @@ pub trait Node: Acceptor + ConcreteNode + std::fmt::Debug {
     fn as_node(&self) -> &dyn Node;
 }
 
+trait EnumVal: 'static {
+    type Ref<'n>;
+    type Mut<'n>;
+
+    fn to_ref<'n>(&'n self) -> Self::Ref<'n>;
+    fn to_mut<'n>(&'n mut self) -> Self::Mut<'n>;
+}
+
+trait FromConcrete<T>: EnumVal {
+    fn from_val(value: T) -> Self;
+    fn from_ref<'n>(value: &'n T) -> Self::Ref<'n>;
+    fn from_mut<'n>(value: &'n mut T) -> Self::Mut<'n>;
+}
+
+/// Extension trait to make FromConcrete easier to use
+trait AsEnum<T: EnumVal> {
+    fn into_enum(self) -> T;
+    fn as_enum<'n>(&'n self) -> T::Ref<'n>;
+    fn as_mut_enum<'n>(&'n mut self) -> T::Mut<'n>;
+}
+impl<N, E: EnumVal + FromConcrete<N>> AsEnum<E> for N {
+    fn into_enum(self) -> E {
+        E::from_val(self)
+    }
+    fn as_enum<'n>(&'n self) -> E::Ref<'n> {
+        E::from_ref(self)
+    }
+    fn as_mut_enum<'n>(&'n mut self) -> E::Mut<'n> {
+        E::from_mut(self)
+    }
+}
+
+macro_rules! impl_from_concrete {
+    (inner: $inner:ident, outer: $outer:ty,) => {
+        impl FromConcrete<$inner> for $outer {
+            fn from_val(value: $inner) -> Self {
+                Self::$inner(value)
+            }
+            fn from_ref(value: &$inner) -> Self::Ref<'_> {
+                Self::Ref::$inner(value)
+            }
+            fn from_mut(value: &mut $inner) -> Self::Mut<'_> {
+                Self::Mut::$inner(value)
+            }
+        }
+    };
+
+    (inner: $inner:ty, outer: $outer:ty, variant: $variant:ident,) => {
+        impl FromConcrete<$inner> for $outer {
+            fn from_val(value: $inner) -> Self {
+                Self::$variant(value)
+            }
+            fn from_ref(value: &$inner) -> Self::Ref<'_> {
+                Self::Ref::$variant(value.to_ref())
+            }
+            fn from_mut(value: &mut $inner) -> Self::Mut<'_> {
+                Self::Mut::$variant(value.to_mut())
+            }
+        }
+    };
+
+    (inner: $inner:ty, outer: $outer:ty, middle: $middle:ty, variant: $variant:ident,) => {
+        impl FromConcrete<$inner> for $outer {
+            fn from_val(value: $inner) -> Self {
+                Self::$variant(<$middle>::from_val(value))
+            }
+            fn from_ref(value: &$inner) -> Self::Ref<'_> {
+                Self::Ref::$variant(<$middle>::from_ref(value))
+            }
+            fn from_mut(value: &mut $inner) -> Self::Mut<'_> {
+                Self::Mut::$variant(<$middle>::from_mut(value))
+            }
+        }
+    };
+}
+
 /// NodeMut is a mutable node.
 trait NodeMut: Node + AcceptorMut + ConcreteNodeMut {}
 
@@ -185,6 +261,38 @@ macro_rules! define_node {
             $($category([< $category Enum >]),)*
         }
 
+        $(#[$node_attr])*
+        #[derive(Copy, Clone)]
+        pub enum [< $node Ref >] <'n> {
+            $($category([< $category Ref >] <'n> ),)*
+        }
+
+        $(#[$node_attr])*
+        pub enum [< $node RefMut >] <'n> {
+            $($category([< $category RefMut >] <'n> ),)*
+        }
+
+        impl EnumVal for $node {
+            type Ref<'n> = [< $node Ref >] <'n>;
+            type Mut<'n> = [< $node RefMut >] <'n>;
+
+            fn to_ref<'n>(&'n self) -> Self::Ref<'n> {
+                match self {
+                    $(Self::$category(x) => Self::Ref::$category(x.to_ref()),)*
+                }
+            }
+
+            fn to_mut<'n>(&'n mut self) -> Self::Mut<'n> {
+                match self {
+                    $(Self::$category(x) => Self::Mut::$category(x.to_mut()),)*
+                }
+            }
+        }
+
+        // hack to work around enum_dispatch deprecation warnings
+        #[allow(deprecated)]
+        mod sub_enums {
+        use super::*;
         $(
             $(#[$category_attr])*
             pub enum [< $category Enum >] {
@@ -205,6 +313,25 @@ macro_rules! define_node {
                 $($subcat( [< $subcat RefMut >] <'n> ),)*
             }
 
+            impl EnumVal for [< $category Enum >] {
+                type Ref<'n> = [< $category Ref >] <'n>;
+                type Mut<'n> = [< $category RefMut >] <'n>;
+
+                fn to_ref<'n>(&'n self) -> Self::Ref<'n> {
+                    match self {
+                        $(Self::$variant(x) => Self::Ref::$variant(x),)*
+                        $(Self::$subcat(x) => Self::Ref::$subcat(x.to_ref()),)*
+                    }
+                }
+
+                fn to_mut<'n>(&'n mut self) -> Self::Mut<'n> {
+                    match self {
+                        $(Self::$variant(x) => Self::Mut::$variant(x),)*
+                        $(Self::$subcat(x) => Self::Mut::$subcat(x.to_mut()),)*
+                    }
+                }
+            }
+
             $(
                 $(#[$subcat_attr])*
                 pub enum [< $subcat Enum >] {
@@ -221,6 +348,71 @@ macro_rules! define_node {
                 pub enum [< $subcat RefMut >] <'n> {
                     $($subvariant(&'n mut $subvariant),)*
                 }
+
+                impl EnumVal for [< $subcat Enum >] {
+                    type Ref<'n> = [< $subcat Ref >] <'n>;
+                    type Mut<'n> = [< $subcat RefMut >] <'n>;
+
+                    fn to_ref<'n>(&'n self) -> Self::Ref<'n> {
+                        match self {
+                            $(Self::$subvariant(x) => Self::Ref::$subvariant(x),)*
+                        }
+                    }
+
+                    fn to_mut<'n>(&'n mut self) -> Self::Mut<'n> {
+                        match self {
+                            $(Self::$subvariant(x) => Self::Mut::$subvariant(x),)*
+                        }
+                    }
+                }
+
+            )*
+        )*
+        }
+        pub use sub_enums::*;
+
+        $(
+            // impl FromConcrete<LeafEnum> for NodeEnum
+            impl_from_concrete!{
+                inner: [<$category Enum>],
+                outer: $node,
+                variant: $category,
+            }
+            $(
+                // impl FromConcrete<TokenEnum> for LeafEnum
+                impl_from_concrete! {
+                    inner: [<$subcat Enum>],
+                    outer: [<$category Enum>],
+                    variant: $subcat,
+                }
+                // impl FromConcrete<TokenEnum> for NodeEnum
+                impl_from_concrete! {
+                    inner: [<$subcat Enum>],
+                    outer: $node,
+                    middle: [<$category Enum>],
+                    variant: $category,
+                }
+                $(
+                    // impl FromConcrete<TokenPipe> for TokenEnum
+                    impl_from_concrete! {
+                        inner: $subvariant,
+                        outer: [<$subcat Enum>],
+                    }
+                    // impl FromConcrete<TokenPipe> for LeafEnum
+                    impl_from_concrete! {
+                        inner: $subvariant,
+                        outer: [<$category Enum>],
+                        middle: [<$subcat Enum>],
+                        variant: $subcat,
+                    }
+                    // impl FromConcrete<TokenPipe> for NodeEnum
+                    impl_from_concrete! {
+                        inner: $subvariant,
+                        outer: $node,
+                        middle: [<$category Enum>],
+                        variant: $category,
+                    }
+                )*
             )*
         )*
 
