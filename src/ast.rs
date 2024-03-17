@@ -61,6 +61,7 @@ pub struct MissingEndError {
 
 pub type VisitResult = ControlFlow<MissingEndError>;
 
+#[enum_dispatch]
 trait AcceptorMut {
     fn accept_mut(&mut self, visitor: &mut Populator<'_>, reversed: bool);
 }
@@ -189,15 +190,15 @@ macro_rules! impl_from_concrete {
 }
 
 /// NodeMut is a mutable node.
-trait NodeMut: Node + AcceptorMut + ConcreteNodeMut {}
+#[enum_dispatch]
+trait NodeMut: Node + AcceptorMut {
+    fn as_mut_node(&mut self) -> NodeEnumRefMut<'_>;
+}
 
 macro_rules! define_node {
     (
         $(#[$node_attr:meta])*
         pub enum $node:ident;
-
-        $(#[$downcast_mut_attr:meta])*
-        $downcast_mut_vis:vis trait $downcast_mut:ident;
 
         $(
             $(#[$category_attr:meta])*
@@ -225,6 +226,7 @@ macro_rules! define_node {
         }
 
         $(#[$node_attr])*
+        #[enum_dispatch(AcceptorMut, NodeMut)]
         pub enum [< $node RefMut >] <'n> {
             $($category([< $category RefMut >] <'n> ),)*
         }
@@ -246,10 +248,6 @@ macro_rules! define_node {
             }
         }
 
-        // hack to work around enum_dispatch deprecation warnings
-        #[allow(deprecated)]
-        mod sub_enums {
-        use super::*;
         $(
             $(#[$category_attr])*
             pub enum [< $category Enum >] {
@@ -265,6 +263,7 @@ macro_rules! define_node {
             }
 
             $(#[$category_attr])*
+            #[enum_dispatch(AcceptorMut, NodeMut)]
             pub enum [< $category RefMut >] <'n> {
                 $($variant(&'n mut $variant),)*
                 $($subcat( [< $subcat RefMut >] <'n> ),)*
@@ -302,6 +301,7 @@ macro_rules! define_node {
                 }
 
                 $(#[$subcat_attr])*
+                #[enum_dispatch(AcceptorMut, NodeMut)]
                 pub enum [< $subcat RefMut >] <'n> {
                     $($subvariant(&'n mut $subvariant),)*
                 }
@@ -325,8 +325,6 @@ macro_rules! define_node {
 
             )*
         )*
-        }
-        pub use sub_enums::*;
 
         $(
             // impl FromConcrete<LeafEnum> for NodeEnum
@@ -387,71 +385,6 @@ macro_rules! define_node {
             )*
         )*
 
-        $(#[$downcast_mut_attr])*
-        $downcast_mut_vis trait $downcast_mut {
-            // as_mut_branch, as_mut_leaf, as_mut_list
-            $(
-                fn [< as_mut_ $category:snake >] (&mut self) -> Option< [< $category RefMut >] <'_> > {
-                    None
-                }
-            )*
-
-            // as_mut_keyword, as_mut_token
-            $($(
-                fn [< as_mut_ $subcat:snake >] (&mut self) -> Option< [< $subcat RefMut >] <'_> > {
-                    None
-                }
-            )*)*
-
-            $($(
-                fn [< as_mut_ $variant:snake >] (&mut self) -> Option<&mut $variant> {
-                    None
-                }
-            )*)*
-        }
-
-        impl<T: $downcast_mut> $downcast_mut for &mut T {
-            $(
-                fn [< as_mut_ $category:snake >] (&mut self) -> Option< [< $category RefMut >] <'_> > {
-                    T::[< as_mut_ $category:snake >](self)
-                }
-            )*
-            $($(
-                fn [< as_mut_ $subcat:snake >] (&mut self) -> Option< [< $subcat RefMut >] <'_> > {
-                    T::[< as_mut_ $subcat:snake >](self)
-                }
-            )*)*
-            $($(
-                fn [< as_mut_ $variant:snake >] (&mut self) -> Option<&mut $variant> {
-                    T::[< as_mut_ $variant:snake >](self)
-                }
-            )*)*
-        }
-
-        $($(
-            impl $downcast_mut for $variant {
-                fn [< as_mut_ $category:snake >] (&mut self) -> Option< [< $category RefMut >] <'_> > {
-                    Some([< $category RefMut >]::$variant(self))
-                }
-
-                fn [< as_mut_ $variant:snake >] (&mut self) -> Option<&mut Self> {
-                    Some(self)
-                }
-            }
-        )*)*
-
-        $($($(
-            impl $downcast_mut for $subvariant {
-                fn [< as_mut_ $category:snake >] (&mut self) -> Option< [< $category RefMut >] <'_> > {
-                    Some([< $category RefMut >]::$subcat([< $subcat RefMut >]::$subvariant(self)))
-                }
-
-                fn [< as_mut_ $subcat:snake >] (&mut self) -> Option< [< $subcat RefMut >] <'_> > {
-                    Some([< $subcat RefMut >]::$subvariant(self))
-                }
-            }
-        )*)*)*
-
         impl<'a> [< $node Ref >] <'a> {
             // Special case for some annoying lifetime problems. Should go away later.
             pub fn enum_accept(self, visitor: &mut impl NodeVisitor<'a>, reverse: bool) {
@@ -472,10 +405,6 @@ define_node! {
     #[enum_dispatch(Acceptor, Node)]
     #[derive(Debug)]
     pub enum NodeEnum;
-
-    #[allow(dead_code)]
-    #[enum_dispatch]
-    trait ConcreteNodeMut;
 
     #[enum_dispatch(Acceptor, Node)]
     #[derive(Debug)]
@@ -734,6 +663,16 @@ impl<T: Token> Token for &mut T {
         T::allowed_tokens(self)
     }
 }
+impl<T: AcceptorMut> AcceptorMut for &mut T {
+    fn accept_mut(&mut self, visitor: &mut Populator<'_>, reversed: bool) {
+        T::accept_mut(self, visitor, reversed)
+    }
+}
+impl<T: NodeMut> NodeMut for &mut T {
+    fn as_mut_node(&mut self) -> NodeEnumRefMut<'_> {
+        T::as_mut_node(self)
+    }
+}
 
 /// Implement the node trait.
 macro_rules! implement_node {
@@ -771,7 +710,11 @@ macro_rules! implement_node {
                 NodeEnum::from_ref(self)
             }
         }
-        impl NodeMut for $name {}
+        impl NodeMut for $name {
+            fn as_mut_node(&mut self) -> NodeEnumRefMut<'_> {
+                NodeEnum::from_mut(self)
+            }
+        }
     };
 }
 
@@ -2392,8 +2335,8 @@ impl Ast {
     pub fn top(&self) -> NodeEnumRef<'_> {
         self.top.as_node()
     }
-    fn top_mut(&mut self) -> &mut dyn NodeMut {
-        &mut *self.top
+    fn top_mut(&mut self) -> NodeEnumRefMut<'_> {
+        self.top.as_mut_node()
     }
     /// \return whether any errors were encountered during parsing.
     pub fn errored(&self) -> bool {
@@ -2728,84 +2671,35 @@ impl Populator<'_> {
     /// will_visit (did_visit) is called before (after) a node's fields are visited.
 
     fn visit_mut(&mut self, node: &mut dyn NodeMut) -> VisitResult {
-        match node.typ() {
-            Type::argument => {
-                self.visit_argument(node.as_mut_argument().unwrap());
-                return VisitResult::Continue(());
+        match node.as_mut_node() {
+            NodeEnumRefMut::Leaf(leaf) => match leaf {
+                LeafRefMut::Argument(argument) => self.visit_argument(argument),
+                LeafRefMut::VariableAssignment(assign) => self.visit_variable_assignment(assign),
+                LeafRefMut::Token(token) => self.visit_token(token),
+                LeafRefMut::Keyword(keyword) => return self.visit_keyword(keyword),
+                LeafRefMut::MaybeNewlines(newlines) => self.visit_maybe_newlines(newlines),
+            },
+            NodeEnumRefMut::Branch(BranchRefMut::JobContinuation(n)) => {
+                self.visit_job_continuation(n);
             }
-            Type::variable_assignment => {
-                self.visit_variable_assignment(node.as_mut_variable_assignment().unwrap());
-                return VisitResult::Continue(());
-            }
-            Type::job_continuation => {
-                self.visit_job_continuation(node.as_mut_job_continuation().unwrap());
-                return VisitResult::Continue(());
-            }
-            Type::token_base => {
-                self.visit_token(node.as_mut_token().unwrap());
-                return VisitResult::Continue(());
-            }
-            Type::keyword_base => {
-                return self.visit_keyword(node.as_mut_keyword().unwrap());
-            }
-            Type::maybe_newlines => {
-                self.visit_maybe_newlines(node.as_mut_maybe_newlines().unwrap());
-                return VisitResult::Continue(());
-            }
-
-            _ => (),
-        }
-
-        match node.category() {
-            Category::leaf => {}
             // Visit branch nodes by just calling accept() to visit their fields.
-            Category::branch => {
+            NodeEnumRefMut::Branch(_branch) => {
                 // This field is a direct embedding of an AST value.
                 node.accept_mut(self, false);
-                return VisitResult::Continue(());
             }
-            Category::list => {
-                // This field is an embedding of an array of (pointers to) ContentsNode.
-                // Parse as many as we can.
-                match node.typ() {
-                    Type::andor_job_list => self.populate_list::<AndorJobList>(
-                        node.as_mut_andor_job_list().unwrap(),
-                        false,
-                    ),
-                    Type::argument_list => self
-                        .populate_list::<ArgumentList>(node.as_mut_argument_list().unwrap(), false),
-                    Type::argument_or_redirection_list => self
-                        .populate_list::<ArgumentOrRedirectionList>(
-                            node.as_mut_argument_or_redirection_list().unwrap(),
-                            false,
-                        ),
-                    Type::case_item_list => self.populate_list::<CaseItemList>(
-                        node.as_mut_case_item_list().unwrap(),
-                        false,
-                    ),
-                    Type::elseif_clause_list => self.populate_list::<ElseifClauseList>(
-                        node.as_mut_elseif_clause_list().unwrap(),
-                        false,
-                    ),
-                    Type::job_conjunction_continuation_list => self
-                        .populate_list::<JobConjunctionContinuationList>(
-                            node.as_mut_job_conjunction_continuation_list().unwrap(),
-                            false,
-                        ),
-                    Type::job_continuation_list => self.populate_list::<JobContinuationList>(
-                        node.as_mut_job_continuation_list().unwrap(),
-                        false,
-                    ),
-                    Type::job_list => {
-                        self.populate_list::<JobList>(node.as_mut_job_list().unwrap(), false)
-                    }
-                    Type::variable_assignment_list => self.populate_list::<VariableAssignmentList>(
-                        node.as_mut_variable_assignment_list().unwrap(),
-                        false,
-                    ),
-                    _ => (),
-                }
-            }
+            // This field is an embedding of an array of (pointers to) ContentsNode.
+            // Parse as many as we can.
+            NodeEnumRefMut::List(list) => match list {
+                ListRefMut::AndorJobList(l) => self.populate_list(l, false),
+                ListRefMut::ArgumentList(l) => self.populate_list(l, false),
+                ListRefMut::ArgumentOrRedirectionList(l) => self.populate_list(l, false),
+                ListRefMut::CaseItemList(l) => self.populate_list(l, false),
+                ListRefMut::ElseifClauseList(l) => self.populate_list(l, false),
+                ListRefMut::JobConjunctionContinuationList(l) => self.populate_list(l, false),
+                ListRefMut::JobContinuationList(l) => self.populate_list(l, false),
+                ListRefMut::JobList(l) => self.populate_list(l, false),
+                ListRefMut::VariableAssignmentList(l) => self.populate_list(l, false),
+            },
         }
         VisitResult::Continue(())
     }
@@ -3790,20 +3684,12 @@ fn parse_from_top(
         errors: pops.errors,
     };
 
-    if top_type == Type::job_list {
-        // Set all parent nodes.
-        // It turns out to be more convenient to do this after the parse phase.
-        ast.top_mut()
-            .as_mut_job_list()
-            .as_mut()
-            .unwrap()
-            .set_parents();
-    } else {
-        ast.top_mut()
-            .as_mut_freestanding_argument_list()
-            .as_mut()
-            .unwrap()
-            .set_parents();
+    // Set all parent nodes.
+    // It turns out to be more convenient to do this after the parse phase.
+    match ast.top_mut() {
+        NodeEnumRefMut::List(ListRefMut::JobList(list)) => list.set_parents(),
+        NodeEnumRefMut::Branch(BranchRefMut::FreestandingArgumentList(list)) => list.set_parents(),
+        _ => unreachable!(),
     }
 
     ast
