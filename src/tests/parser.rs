@@ -1,4 +1,4 @@
-use crate::ast::{self, Ast, ConcreteNode, List, Node, Traversal};
+use crate::ast::{self, Ast, List, Node, Traversal};
 use crate::common::ScopeGuard;
 use crate::expand::ExpandFlags;
 use crate::io::{IoBufferfill, IoChain};
@@ -34,8 +34,12 @@ fn test_parser() {
         if ast.errored() {
             return Err(ParserTestErrorBits::ERROR);
         }
-        let top = ast.top();
-        let args = &top.as_freestanding_argument_list().unwrap().arguments;
+        let ast::NodeEnumRef::Branch(ast::BranchRef::FreestandingArgumentList(arg_list)) =
+            ast.top()
+        else {
+            panic!()
+        };
+        let args = &arg_list.arguments;
         let first_arg = args.get(0).expect("Failed to parse an argument");
         let mut errors = None;
         parse_util_detect_errors_in_argument(first_arg, first_arg.source(&src), &mut errors)

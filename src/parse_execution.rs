@@ -178,12 +178,12 @@ impl<'a> ParseExecutionContext {
         node: &dyn Node,
         associated_block: Option<BlockId>,
     ) -> EndExecutionReason {
-        match node.typ() {
-            ast::Type::statement => {
-                self.eval_statement(ctx, node.as_statement().unwrap(), associated_block)
+        match node.as_node() {
+            ast::NodeEnumRef::Branch(ast::BranchRef::Statement(n)) => {
+                self.eval_statement(ctx, n, associated_block)
             }
-            ast::Type::job_list => {
-                self.eval_job_list(ctx, node.as_job_list().unwrap(), associated_block.unwrap())
+            ast::NodeEnumRef::List(ast::ListRef::JobList(n)) => {
+                self.eval_job_list(ctx, n, associated_block.unwrap())
             }
             _ => unreachable!(),
         }

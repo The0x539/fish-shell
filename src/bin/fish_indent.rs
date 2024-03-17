@@ -14,8 +14,8 @@ use std::sync::atomic::Ordering;
 use libc::{LC_ALL, STDOUT_FILENO};
 
 use fish::ast::{
-    self, Ast, Category, ConcreteNode, Leaf, List, Node, NodeEnumRef, NodeVisitor, SourceRangeList,
-    Token, Traversal, Type,
+    self, Acceptor, Ast, BranchRef, Category, Leaf, LeafRef, List, ListRef, Node, NodeEnumRef,
+    NodeVisitor, SourceRangeList, Token, TokenRef, Traversal, Type,
 };
 use fish::builtins::shared::{STATUS_CMD_ERROR, STATUS_CMD_OK};
 use fish::common::{
@@ -215,17 +215,15 @@ impl<'source, 'ast> PrettyPrinter<'source, 'ast> {
         // andor_job_lists get semis if the input uses semis.
         for node in Traversal::new(self.ast.top()) {
             // See if we have a condition and an andor_job_list.
-            let condition;
-            let andors;
-            if let Some(ifc) = node.as_if_clause() {
-                condition = ifc.condition.semi_nl.as_ref();
-                andors = &ifc.andor_tail;
-            } else if let Some(wc) = node.as_while_header() {
-                condition = wc.condition.semi_nl.as_ref();
-                andors = &wc.andor_tail;
-            } else {
-                continue;
-            }
+            let (condition, andors) = match node {
+                NodeEnumRef::Branch(BranchRef::IfClause(ifc)) => {
+                    (ifc.condition.semi_nl.as_ref(), &ifc.andor_tail)
+                }
+                NodeEnumRef::Branch(BranchRef::WhileHeader(wc)) => {
+                    (wc.condition.semi_nl.as_ref(), &wc.andor_tail)
+                }
+                _ => continue,
+            };
 
             // If there is no and-or tail then we always use a newline.
             if andors.count() > 0 {
@@ -239,7 +237,7 @@ impl<'source, 'ast> PrettyPrinter<'source, 'ast> {
 
         // `x ; and y` gets semis if it has them already, and they are on the same line.
         for node in Traversal::new(self.ast.top()) {
-            let Some(job_list) = node.as_job_list() else {
+            let NodeEnumRef::List(ListRef::JobList(job_list)) = node else {
                 continue;
             };
             let mut prev_job_semi_nl = None;
@@ -285,14 +283,16 @@ impl<'source, 'ast> PrettyPrinterState<'source, 'ast> {
     // \return gap text flags for the gap text that comes *before* a given node type.
     fn gap_text_flags_before_node(&self, node: impl Node) -> GapFlags {
         let mut result = GapFlags::default();
-        match node.typ() {
+        match node.as_node() {
             // Allow escaped newlines before leaf nodes that can be part of a long command.
-            Type::argument | Type::redirection | Type::variable_assignment => {
-                result.allow_escaped_newlines = true
+            NodeEnumRef::Leaf(LeafRef::Argument(_))
+            | NodeEnumRef::Leaf(LeafRef::VariableAssignment(_))
+            | NodeEnumRef::Branch(BranchRef::Redirection(_)) => {
+                result.allow_escaped_newlines = true;
             }
-            Type::token_base => {
+            NodeEnumRef::Leaf(LeafRef::Token(token)) => {
                 // Allow escaped newlines before && and ||, and also pipes.
-                match node.as_token().unwrap().token_type() {
+                match token.token_type() {
                     ParseTokenType::andand | ParseTokenType::oror | ParseTokenType::pipe => {
                         result.allow_escaped_newlines = true;
                     }
@@ -305,16 +305,17 @@ impl<'source, 'ast> PrettyPrinterState<'source, 'ast> {
                         }
                         let p = p.parent().unwrap();
                         assert_eq!(p.typ(), Type::statement);
-                        let p = p.parent().unwrap();
-                        if let Some(job) = p.as_job_pipeline() {
+                        let p = p.parent().unwrap().as_node();
+
+                        if let NodeEnumRef::Branch(BranchRef::JobPipeline(job)) = p {
                             if !job.variables.is_empty() {
                                 result.allow_escaped_newlines = true;
                             }
-                        } else if let Some(job_cnt) = p.as_job_continuation() {
+                        } else if let NodeEnumRef::Branch(BranchRef::JobContinuation(job_cnt)) = p {
                             if !job_cnt.variables.is_empty() {
                                 result.allow_escaped_newlines = true;
                             }
-                        } else if let Some(not_stmt) = p.as_not_statement() {
+                        } else if let NodeEnumRef::Branch(BranchRef::NotStatement(not_stmt)) = p {
                             if !not_stmt.variables.is_empty() {
                                 result.allow_escaped_newlines = true;
                             }
@@ -691,42 +692,24 @@ fn parse_flags() -> ParseTreeFlags {
 impl<'source, 'ast> NodeVisitor<'_> for PrettyPrinterState<'source, 'ast> {
     // Default implementation is to just visit children.
     fn visit(&mut self, node: NodeEnumRef<'_>) {
-        // Leaf nodes we just visit their text.
-        if node.as_keyword().is_some() {
-            self.emit_node_text(node);
-            return;
-        }
-        if let Some(token) = node.as_token() {
-            if token.token_type() == ParseTokenType::end {
-                self.visit_semi_nl(token);
-                return;
-            }
-            self.emit_node_text(node);
-            return;
-        }
-        match node.typ() {
-            Type::argument | Type::variable_assignment => {
-                self.emit_node_text(node);
-            }
-            Type::redirection => {
-                self.visit_redirection(node.as_redirection().unwrap());
-            }
-            Type::maybe_newlines => {
-                self.visit_maybe_newlines(node.as_maybe_newlines().unwrap());
-            }
-            Type::begin_header => {
+        match node {
+            // Leaf nodes we just visit their text.
+            NodeEnumRef::Leaf(l) => match l {
+                LeafRef::Token(TokenRef::SemiNl(n)) => self.visit_semi_nl(n),
+                LeafRef::MaybeNewlines(n) => self.visit_maybe_newlines(n),
+                _ => self.emit_node_text(l),
+            },
+
+            NodeEnumRef::Branch(BranchRef::Redirection(n)) => self.visit_redirection(n),
+            NodeEnumRef::Branch(BranchRef::BeginHeader(n)) => {
                 // 'begin' does not require a newline after it, but we insert one.
-                node.enum_accept(self, false);
+                n.accept(self, false);
                 self.visit_begin_header();
             }
-            _ => {
-                // For branch and list nodes, default is to visit their children.
-                if [Category::branch, Category::list].contains(&node.category()) {
-                    node.enum_accept(self, false);
-                    return;
-                }
-                panic!("unexpected node type");
-            }
+
+            // For branch and list nodes, default is to visit their children.
+            NodeEnumRef::Branch(n) => n.accept(self, false),
+            NodeEnumRef::List(n) => n.accept(self, false),
         }
     }
 }

@@ -1,9 +1,9 @@
 //! Functions for syntax highlighting.
 use crate::abbrs::{self, with_abbrs};
 use crate::ast::{
-    self, Argument, Ast, BlockStatement, BlockStatementHeaderVariant, ConcreteNode,
-    DecoratedStatement, Keyword, Leaf, List, Node, NodeEnumRef, NodeVisitor, Redirection, Token,
-    Type, VariableAssignment,
+    self, Argument, Ast, BlockStatement, BlockStatementHeaderVariant, BranchRef,
+    DecoratedStatement, Keyword, Leaf, LeafRef, List, Node, NodeEnumRef, NodeVisitor, Redirection,
+    Token, TokenRef, VariableAssignment,
 };
 use crate::builtins::shared::builtin_exists;
 use crate::color::RgbColor;
@@ -297,8 +297,10 @@ fn autosuggest_parse_command(
     );
 
     // Find the first statement.
-    let top = ast.top();
-    let jc = top.as_job_list().unwrap().get(0)?;
+    let NodeEnumRef::List(ast::ListRef::JobList(job_list)) = ast.top() else {
+        panic!()
+    };
+    let jc = job_list.get(0)?;
     let first_statement = jc.job.statement.contents.as_decorated_statement()?;
 
     if let Some(expanded_command) = statement_get_expanded_command(buff, first_statement, ctx) {
@@ -1448,27 +1450,23 @@ fn contains_pending_variable(pending_variables: &[&wstr], haystack: &wstr) -> bo
 
 impl<'s, 'a> NodeVisitor<'a> for Highlighter<'s> {
     fn visit(&mut self, node: NodeEnumRef<'a>) {
-        if let Some(keyword) = node.as_keyword() {
-            return self.visit_keyword(keyword);
-        }
-        if let Some(token) = node.as_token() {
-            if token.token_type() == ParseTokenType::end {
-                self.visit_semi_nl(node);
-                return;
-            }
-            self.visit_token(token);
-            return;
-        }
-        match node.typ() {
-            Type::argument => self.visit_argument(node.as_argument().unwrap(), false, true),
-            Type::redirection => self.visit_redirection(node.as_redirection().unwrap()),
-            Type::variable_assignment => {
-                self.visit_variable_assignment(node.as_variable_assignment().unwrap())
-            }
-            Type::decorated_statement => {
-                self.visit_decorated_statement(node.as_decorated_statement().unwrap())
-            }
-            Type::block_statement => self.visit_block_statement(node.as_block_statement().unwrap()),
+        match node {
+            NodeEnumRef::Leaf(l) => match l {
+                LeafRef::Keyword(n) => self.visit_keyword(n),
+                LeafRef::Token(TokenRef::SemiNl(n)) => self.visit_semi_nl(n.as_node()),
+                LeafRef::Token(token) => self.visit_token(token),
+                LeafRef::Argument(n) => self.visit_argument(n, false, true),
+                LeafRef::VariableAssignment(n) => self.visit_variable_assignment(n),
+                _ => self.visit_children(l),
+            },
+
+            NodeEnumRef::Branch(b) => match b {
+                BranchRef::Redirection(n) => self.visit_redirection(n),
+                BranchRef::DecoratedStatement(n) => self.visit_decorated_statement(n),
+                BranchRef::BlockStatement(n) => self.visit_block_statement(n),
+                _ => self.visit_children(b),
+            },
+
             // Default implementation is to just visit children.
             _ => self.visit_children(node),
         }

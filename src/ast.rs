@@ -76,7 +76,7 @@ impl<T: AcceptorMut> AcceptorMut for Option<T> {
 
 /// Node is the base trait of all AST nodes.
 #[enum_dispatch]
-pub trait Node: Acceptor + ConcreteNode + std::fmt::Debug {
+pub trait Node: Acceptor + std::fmt::Debug {
     /// The parent node, or null if this is root.
     fn parent(&self) -> Option<&dyn Node>;
 
@@ -88,15 +88,15 @@ pub trait Node: Acceptor + ConcreteNode + std::fmt::Debug {
 
     /// \return a helpful string description of this node.
     fn describe(&self) -> WString {
-        let mut res = ast_type_to_string(self.typ()).to_owned();
-        if let Some(n) = self.as_token() {
-            let token_type = n.token_type().to_wstr();
-            sprintf!(=> &mut res, " '%ls'", token_type);
-        } else if let Some(n) = self.as_keyword() {
-            let keyword = n.keyword().to_wstr();
-            sprintf!(=> &mut res, " '%ls'", keyword);
+        match self.as_node() {
+            NodeEnumRef::Leaf(LeafRef::Token(n)) => {
+                sprintf!(" '%ls'", n.token_type().to_wstr())
+            }
+            NodeEnumRef::Leaf(LeafRef::Keyword(n)) => {
+                sprintf!(" '%ls'", n.keyword().to_wstr())
+            }
+            _ => ast_type_to_string(self.typ()).to_owned(),
         }
-        res
     }
 
     /// \return the source range for this node, or none if unsourced.
@@ -195,9 +195,6 @@ macro_rules! define_node {
     (
         $(#[$node_attr:meta])*
         pub enum $node:ident;
-
-        $(#[$downcast_attr:meta])*
-        $downcast_vis:vis trait $downcast:ident;
 
         $(#[$downcast_mut_attr:meta])*
         $downcast_mut_vis:vis trait $downcast_mut:ident;
@@ -390,29 +387,6 @@ macro_rules! define_node {
             )*
         )*
 
-        $(#[$downcast_attr])*
-        $downcast_vis trait $downcast {
-            // as_branch, as_leaf, as_list
-            $(
-                fn [< as_ $category:snake >] (&self) -> Option< [< $category Ref >] <'_> > {
-                    None
-                }
-            )*
-
-            // as_keyword, as_token
-            $($(
-                fn [< as_ $subcat:snake >] (&self) -> Option< [< $subcat Ref >] <'_> > {
-                    None
-                }
-            )*)*
-
-            $($(
-                fn [< as_ $variant:snake >] (&self) -> Option<&$variant> {
-                    None
-                }
-            )*)*
-        }
-
         $(#[$downcast_mut_attr])*
         $downcast_mut_vis trait $downcast_mut {
             // as_mut_branch, as_mut_leaf, as_mut_list
@@ -436,40 +410,6 @@ macro_rules! define_node {
             )*)*
         }
 
-        impl<T: $downcast> $downcast for &T {
-            $(
-                fn [< as_ $category:snake >] (&self) -> Option< [< $category Ref >] <'_> > {
-                    T::[< as_ $category:snake >](self)
-                }
-            )*
-            $($(
-                fn [< as_ $subcat:snake >] (&self) -> Option< [< $subcat Ref >] <'_> > {
-                    T::[< as_ $subcat:snake >](self)
-                }
-            )*)*
-            $($(
-                fn [< as_ $variant:snake >] (&self) -> Option<&$variant> {
-                    T::[< as_ $variant:snake >](self)
-                }
-            )*)*
-        }
-        impl<T: $downcast> $downcast for &mut T {
-            $(
-                fn [< as_ $category:snake >] (&self) -> Option< [< $category Ref >] <'_> > {
-                    T::[< as_ $category:snake >](self)
-                }
-            )*
-            $($(
-                fn [< as_ $subcat:snake >] (&self) -> Option< [< $subcat Ref >] <'_> > {
-                    T::[< as_ $subcat:snake >](self)
-                }
-            )*)*
-            $($(
-                fn [< as_ $variant:snake >] (&self) -> Option<&$variant> {
-                    T::[< as_ $variant:snake >](self)
-                }
-            )*)*
-        }
         impl<T: $downcast_mut> $downcast_mut for &mut T {
             $(
                 fn [< as_mut_ $category:snake >] (&mut self) -> Option< [< $category RefMut >] <'_> > {
@@ -489,16 +429,6 @@ macro_rules! define_node {
         }
 
         $($(
-            impl $downcast for $variant {
-                fn [< as_ $category:snake >] (&self) -> Option< [< $category Ref >] <'_> > {
-                    Some([< $category Ref >]::$variant(self))
-                }
-
-                fn [< as_ $variant:snake >] (&self) -> Option<&Self> {
-                    Some(self)
-                }
-            }
-
             impl $downcast_mut for $variant {
                 fn [< as_mut_ $category:snake >] (&mut self) -> Option< [< $category RefMut >] <'_> > {
                     Some([< $category RefMut >]::$variant(self))
@@ -511,16 +441,6 @@ macro_rules! define_node {
         )*)*
 
         $($($(
-            impl $downcast for $subvariant {
-                fn [< as_ $category:snake >] (&self) -> Option< [< $category Ref >] <'_> > {
-                    Some([< $category Ref >]::$subcat([< $subcat Ref >]::$subvariant(self)))
-                }
-
-                fn [< as_ $subcat:snake >] (&self) -> Option< [< $subcat Ref >] <'_> > {
-                    Some([< $subcat Ref >]::$subvariant(self))
-                }
-            }
-
             impl $downcast_mut for $subvariant {
                 fn [< as_mut_ $category:snake >] (&mut self) -> Option< [< $category RefMut >] <'_> > {
                     Some([< $category RefMut >]::$subcat([< $subcat RefMut >]::$subvariant(self)))
@@ -549,18 +469,15 @@ macro_rules! define_node {
 }
 
 define_node! {
-    #[enum_dispatch(Acceptor, ConcreteNode, Node)]
+    #[enum_dispatch(Acceptor, Node)]
     #[derive(Debug)]
     pub enum NodeEnum;
-
-    #[enum_dispatch]
-    pub trait ConcreteNode;
 
     #[allow(dead_code)]
     #[enum_dispatch]
     trait ConcreteNodeMut;
 
-    #[enum_dispatch(Acceptor, ConcreteNode, Node)]
+    #[enum_dispatch(Acceptor, Node)]
     #[derive(Debug)]
     pub enum Branch {
         Redirection,
@@ -587,14 +504,14 @@ define_node! {
         FreestandingArgumentList,
     }
 
-    #[enum_dispatch(Acceptor, ConcreteNode, Node, Leaf)]
+    #[enum_dispatch(Acceptor, Node, Leaf)]
     #[derive(Debug)]
     pub enum Leaf {
         VariableAssignment,
         MaybeNewlines,
         Argument,
         @
-        #[enum_dispatch(Acceptor, ConcreteNode, Node, Leaf, Keyword)]
+        #[enum_dispatch(Acceptor, Node, Leaf, Keyword)]
         #[derive(Debug)]
         pub enum Keyword {
             DecoratedStatementDecorator,
@@ -612,7 +529,7 @@ define_node! {
             KeywordTime,
             KeywordWhile,
         }
-        #[enum_dispatch(Acceptor, ConcreteNode, Node, Leaf, Token)]
+        #[enum_dispatch(Acceptor, Node, Leaf, Token)]
         #[derive(Debug)]
         pub enum Token {
             SemiNl,
@@ -624,7 +541,7 @@ define_node! {
         }
     }
 
-    #[enum_dispatch(Acceptor, ConcreteNode, Node)]
+    #[enum_dispatch(Acceptor, Node)]
     #[derive(Debug)]
     pub enum List {
         VariableAssignmentList,
@@ -2493,14 +2410,14 @@ impl Ast {
             // dot-| padding
             result += &str::repeat("! ", depth)[..];
 
-            if let Some(n) = node.as_argument() {
+            if let NodeEnumRef::Leaf(LeafRef::Argument(n)) = node {
                 result += "argument";
                 if let Some(argsrc) = n.try_source(orig) {
                     sprintf!(=> &mut result, ": '%ls'", argsrc);
                 }
-            } else if let Some(n) = node.as_keyword() {
+            } else if let NodeEnumRef::Leaf(LeafRef::Keyword(n)) = node {
                 sprintf!(=> &mut result, "keyword: %ls", n.keyword().to_wstr());
-            } else if let Some(n) = node.as_token() {
+            } else if let NodeEnumRef::Leaf(LeafRef::Token(n)) = node {
                 let desc = match n.token_type() {
                     ParseTokenType::string => {
                         let mut desc = WString::from_str("string");
@@ -2556,8 +2473,8 @@ struct SourceRangeVisitor {
 
 impl<'a> NodeVisitor<'a> for SourceRangeVisitor {
     fn visit(&mut self, node: NodeEnumRef<'a>) {
-        match node.category() {
-            Category::leaf => match node.as_leaf().unwrap().range() {
+        match node {
+            NodeEnumRef::Leaf(leaf) => match leaf.range() {
                 None => self.any_unsourced = true,
                 // Union with our range.
                 Some(range) if range.length > 0 => {
@@ -2920,39 +2837,26 @@ impl Populator<'_> {
         // incomplete; in particular parent nodes are not set.
         let mut cursor = node.as_node();
         let header = loop {
-            match cursor.typ() {
-                Type::block_statement => {
-                    let NodeEnumRef::Branch(BranchRef::BlockStatement(block_stmt)) = cursor else {
-                        panic!();
-                    };
-                    cursor = block_stmt.header.embedded_node();
-                }
-                Type::for_header => {
-                    let n = cursor.as_for_header().unwrap();
-                    break Some((n.kw_for.range.unwrap(), L!("for loop")));
-                }
-                Type::while_header => {
-                    let n = cursor.as_while_header().unwrap();
-                    break Some((n.kw_while.range.unwrap(), L!("while loop")));
-                }
-                Type::function_header => {
-                    let n = cursor.as_function_header().unwrap();
-                    break Some((n.kw_function.range.unwrap(), L!("function definition")));
-                }
-                Type::begin_header => {
-                    let n = cursor.as_begin_header().unwrap();
-                    break Some((n.kw_begin.range.unwrap(), L!("begin")));
-                }
-                Type::if_statement => {
-                    let n = cursor.as_if_statement().unwrap();
-                    break Some((n.if_clause.kw_if.range.unwrap(), L!("if statement")));
-                }
-                Type::switch_statement => {
-                    let n = cursor.as_switch_statement().unwrap();
-                    break Some((n.kw_switch.range.unwrap(), L!("switch statement")));
-                }
-                _ => break None,
+            let NodeEnumRef::Branch(branch) = cursor else {
+                break None;
+            };
+
+            if let BranchRef::BlockStatement(n) = branch {
+                cursor = n.header.embedded_node();
+                continue;
             }
+
+            let (range, stmt) = match branch {
+                BranchRef::ForHeader(n) => (n.kw_for.range, L!("for loop")),
+                BranchRef::WhileHeader(n) => (n.kw_while.range, L!("while loop")),
+                BranchRef::FunctionHeader(n) => (n.kw_function.range, L!("function definition")),
+                BranchRef::BeginHeader(n) => (n.kw_begin.range, L!("begin")),
+                BranchRef::IfStatement(n) => (n.if_clause.kw_if.range, L!("if statement")),
+                BranchRef::SwitchStatement(n) => (n.kw_switch.range, L!("switch statement")),
+                _ => break None,
+            };
+
+            break Some((range.unwrap(), stmt));
         };
 
         if let Some((header_kw_range, enclosing_stmt)) = header {
