@@ -1019,7 +1019,7 @@ impl<'a> NodeVisitor<'a> for IndentVisitor<'a> {
             self.last_indent = self.indent;
         }
 
-        node.enum_accept(self, false);
+        node.accept(self, false);
         self.indent -= dec;
     }
 }

@@ -25,6 +25,7 @@ use crate::tokenizer::{
 };
 use crate::wchar::prelude::*;
 use enum_dispatch::enum_dispatch;
+use fish_macros::{blanket_mut, blanket_ref, define_node};
 use std::ops::{ControlFlow, Index, IndexMut};
 
 /**
@@ -39,6 +40,7 @@ pub trait NodeVisitor<'a> {
 }
 
 #[enum_dispatch]
+#[blanket_ref]
 pub trait Acceptor {
     fn accept<'a>(&'a self, visitor: &mut impl NodeVisitor<'a>, reversed: bool)
     where
@@ -62,6 +64,7 @@ pub struct MissingEndError {
 pub type VisitResult = ControlFlow<MissingEndError>;
 
 #[enum_dispatch]
+#[blanket_mut]
 trait AcceptorMut {
     fn accept_mut(&mut self, visitor: &mut Populator<'_>, reversed: bool);
 }
@@ -77,6 +80,7 @@ impl<T: AcceptorMut> AcceptorMut for Option<T> {
 
 /// Node is the base trait of all AST nodes.
 #[enum_dispatch]
+#[blanket_ref]
 pub trait Node: Acceptor + std::fmt::Debug {
     /// The parent node, or null if this is root.
     fn parent(&self) -> Option<&dyn Node>;
@@ -129,364 +133,16 @@ pub trait Node: Acceptor + std::fmt::Debug {
     fn as_node(&self) -> NodeEnumRef<'_>;
 }
 
-#[allow(dead_code)]
-trait EnumVal: 'static {
-    type Ref<'n>;
-    type Mut<'n>;
-
-    fn to_ref(&self) -> Self::Ref<'_>;
-    fn to_mut(&mut self) -> Self::Mut<'_>;
-}
-
-#[allow(dead_code)]
-trait FromConcrete<T>: EnumVal {
-    fn from_val(value: T) -> Self;
-    fn from_ref(value: &T) -> Self::Ref<'_>;
-    fn from_mut(value: &mut T) -> Self::Mut<'_>;
-}
-
-macro_rules! impl_from_concrete {
-    (inner: $inner:ident, outer: $outer:ty,) => {
-        impl FromConcrete<$inner> for $outer {
-            fn from_val(value: $inner) -> Self {
-                Self::$inner(value)
-            }
-            fn from_ref(value: &$inner) -> Self::Ref<'_> {
-                Self::Ref::$inner(value)
-            }
-            fn from_mut(value: &mut $inner) -> Self::Mut<'_> {
-                Self::Mut::$inner(value)
-            }
-        }
-    };
-
-    (inner: $inner:ty, outer: $outer:ty, variant: $variant:ident,) => {
-        impl FromConcrete<$inner> for $outer {
-            fn from_val(value: $inner) -> Self {
-                Self::$variant(value)
-            }
-            fn from_ref(value: &$inner) -> Self::Ref<'_> {
-                Self::Ref::$variant(value.to_ref())
-            }
-            fn from_mut(value: &mut $inner) -> Self::Mut<'_> {
-                Self::Mut::$variant(value.to_mut())
-            }
-        }
-    };
-
-    (inner: $inner:ty, outer: $outer:ty, middle: $middle:ty, variant: $variant:ident,) => {
-        impl FromConcrete<$inner> for $outer {
-            fn from_val(value: $inner) -> Self {
-                Self::$variant(<$middle>::from_val(value))
-            }
-            fn from_ref(value: &$inner) -> Self::Ref<'_> {
-                Self::Ref::$variant(<$middle>::from_ref(value))
-            }
-            fn from_mut(value: &mut $inner) -> Self::Mut<'_> {
-                Self::Mut::$variant(<$middle>::from_mut(value))
-            }
-        }
-    };
-}
-
 /// NodeMut is a mutable node.
 #[enum_dispatch]
+#[blanket_mut]
 trait NodeMut: Node + AcceptorMut {
-    fn as_mut_node(&mut self) -> NodeEnumRefMut<'_>;
-}
-
-macro_rules! define_node {
-    (
-        $(#[$node_attr:meta])*
-        pub enum $node:ident;
-
-        $(
-            $(#[$category_attr:meta])*
-            pub enum $category:ident {
-                $($variant:ident,)*
-                $(@)?
-                $(
-                    $(#[$subcat_attr:meta])*
-                    pub enum $subcat:ident {
-                        $($subvariant:ident,)*
-                    }
-                )*
-            }
-        )*
-    ) => {paste::paste!{
-        $(#[$node_attr])*
-        pub enum $node {
-            $($category([< $category Enum >]),)*
-        }
-
-        $(#[$node_attr])*
-        #[derive(Copy, Clone)]
-        pub enum [< $node Ref >] <'n> {
-            $($category([< $category Ref >] <'n> ),)*
-        }
-
-        $(#[$node_attr])*
-        #[enum_dispatch(AcceptorMut, NodeMut)]
-        pub enum [< $node RefMut >] <'n> {
-            $($category([< $category RefMut >] <'n> ),)*
-        }
-
-        impl EnumVal for $node {
-            type Ref<'n> = [< $node Ref >] <'n>;
-            type Mut<'n> = [< $node RefMut >] <'n>;
-
-            fn to_ref(&self) -> Self::Ref<'_> {
-                match self {
-                    $(Self::$category(x) => Self::Ref::$category(x.to_ref()),)*
-                }
-            }
-
-            fn to_mut(&mut self) -> Self::Mut<'_> {
-                match self {
-                    $(Self::$category(x) => Self::Mut::$category(x.to_mut()),)*
-                }
-            }
-        }
-
-        $(
-            $(#[$category_attr])*
-            pub enum [< $category Enum >] {
-                $($variant($variant),)*
-                $($subcat([< $subcat Enum >]),)*
-            }
-
-            $(#[$category_attr])*
-            #[derive(Copy, Clone)]
-            pub enum [< $category Ref >] <'n> {
-                $($variant(&'n $variant),)*
-                $($subcat( [< $subcat Ref >] <'n> ),)*
-            }
-
-            $(#[$category_attr])*
-            #[enum_dispatch(AcceptorMut, NodeMut)]
-            pub enum [< $category RefMut >] <'n> {
-                $($variant(&'n mut $variant),)*
-                $($subcat( [< $subcat RefMut >] <'n> ),)*
-            }
-
-            impl EnumVal for [< $category Enum >] {
-                type Ref<'n> = [< $category Ref >] <'n>;
-                type Mut<'n> = [< $category RefMut >] <'n>;
-
-                fn to_ref(&self) -> Self::Ref<'_> {
-                    match self {
-                        $(Self::$variant(x) => Self::Ref::$variant(x),)*
-                        $(Self::$subcat(x) => Self::Ref::$subcat(x.to_ref()),)*
-                    }
-                }
-
-                fn to_mut(&mut self) -> Self::Mut<'_> {
-                    match self {
-                        $(Self::$variant(x) => Self::Mut::$variant(x),)*
-                        $(Self::$subcat(x) => Self::Mut::$subcat(x.to_mut()),)*
-                    }
-                }
-            }
-
-            $(
-                $(#[$subcat_attr])*
-                pub enum [< $subcat Enum >] {
-                    $($subvariant($subvariant),)*
-                }
-
-                $(#[$subcat_attr])*
-                #[derive(Copy, Clone)]
-                pub enum [< $subcat Ref >] <'n> {
-                    $($subvariant(&'n $subvariant),)*
-                }
-
-                $(#[$subcat_attr])*
-                #[enum_dispatch(AcceptorMut, NodeMut)]
-                pub enum [< $subcat RefMut >] <'n> {
-                    $($subvariant(&'n mut $subvariant),)*
-                }
-
-                impl EnumVal for [< $subcat Enum >] {
-                    type Ref<'n> = [< $subcat Ref >] <'n>;
-                    type Mut<'n> = [< $subcat RefMut >] <'n>;
-
-                    fn to_ref(&self) -> Self::Ref<'_> {
-                        match self {
-                            $(Self::$subvariant(x) => Self::Ref::$subvariant(x),)*
-                        }
-                    }
-
-                    fn to_mut(&mut self) -> Self::Mut<'_> {
-                        match self {
-                            $(Self::$subvariant(x) => Self::Mut::$subvariant(x),)*
-                        }
-                    }
-                }
-
-            )*
-        )*
-
-        $(
-            // impl FromConcrete<LeafEnum> for NodeEnum
-            impl_from_concrete!{
-                inner: [<$category Enum>],
-                outer: $node,
-                variant: $category,
-            }
-            $(
-                // impl FromConcrete<SwitchStatement> for BranchEnum
-                impl_from_concrete! {
-                    inner: $variant,
-                    outer: [<$category Enum>],
-                }
-                // impl FromConcrete<SwitchStatement> for NodeEnum
-                impl_from_concrete! {
-                    inner: $variant,
-                    outer: $node,
-                    middle: [<$category Enum>],
-                    variant: $category,
-                }
-            )*
-            $(
-                // impl FromConcrete<TokenEnum> for LeafEnum
-                impl_from_concrete! {
-                    inner: [<$subcat Enum>],
-                    outer: [<$category Enum>],
-                    variant: $subcat,
-                }
-                // impl FromConcrete<TokenEnum> for NodeEnum
-                impl_from_concrete! {
-                    inner: [<$subcat Enum>],
-                    outer: $node,
-                    middle: [<$category Enum>],
-                    variant: $category,
-                }
-                $(
-                    // impl FromConcrete<TokenPipe> for TokenEnum
-                    impl_from_concrete! {
-                        inner: $subvariant,
-                        outer: [<$subcat Enum>],
-                    }
-                    // impl FromConcrete<TokenPipe> for LeafEnum
-                    impl_from_concrete! {
-                        inner: $subvariant,
-                        outer: [<$category Enum>],
-                        middle: [<$subcat Enum>],
-                        variant: $subcat,
-                    }
-                    // impl FromConcrete<TokenPipe> for NodeEnum
-                    impl_from_concrete! {
-                        inner: $subvariant,
-                        outer: $node,
-                        middle: [<$category Enum>],
-                        variant: $category,
-                    }
-                )*
-            )*
-        )*
-
-        impl<'a> [< $node Ref >] <'a> {
-            // Special case for some annoying lifetime problems. Should go away later.
-            pub fn enum_accept(self, visitor: &mut impl NodeVisitor<'a>, reverse: bool) {
-                match self {
-                    $(Self::$category(x) => match x {
-                        $([<$category Ref>]::$variant(y) => y.accept(visitor, reverse),)*
-                        $([<$category Ref>]::$subcat(z) => match z {
-                            $([<$subcat Ref>]::$subvariant(w) => w.accept(visitor, reverse),)*
-                        },)*
-                    },)*
-                }
-            }
-        }
-    }}
-}
-
-define_node! {
-    #[enum_dispatch(Acceptor, Node)]
-    #[derive(Debug)]
-    pub enum NodeEnum;
-
-    #[enum_dispatch(Acceptor, Node)]
-    #[derive(Debug)]
-    pub enum Branch {
-        Redirection,
-        ArgumentOrRedirection,
-        Statement,
-        JobPipeline,
-        JobConjunction,
-        ForHeader,
-        WhileHeader,
-        FunctionHeader,
-        BeginHeader,
-        BlockStatement,
-        IfClause,
-        ElseifClause,
-        ElseClause,
-        IfStatement,
-        CaseItem,
-        SwitchStatement,
-        DecoratedStatement,
-        NotStatement,
-        JobContinuation,
-        JobConjunctionContinuation,
-        AndorJob,
-        FreestandingArgumentList,
-    }
-
-    #[enum_dispatch(Acceptor, Node, Leaf)]
-    #[derive(Debug)]
-    pub enum Leaf {
-        VariableAssignment,
-        MaybeNewlines,
-        Argument,
-        @
-        #[enum_dispatch(Acceptor, Node, Leaf, Keyword)]
-        #[derive(Debug)]
-        pub enum Keyword {
-            DecoratedStatementDecorator,
-            JobConjunctionDecorator,
-            KeywordBegin,
-            KeywordCase,
-            KeywordElse,
-            KeywordEnd,
-            KeywordFor,
-            KeywordFunction,
-            KeywordIf,
-            KeywordIn,
-            KeywordNot,
-            KeywordSwitch,
-            KeywordTime,
-            KeywordWhile,
-        }
-        #[enum_dispatch(Acceptor, Node, Leaf, Token)]
-        #[derive(Debug)]
-        pub enum Token {
-            SemiNl,
-            String_,
-            TokenBackground,
-            TokenConjunction,
-            TokenPipe,
-            TokenRedirection,
-        }
-    }
-
-    #[enum_dispatch(Acceptor, Node)]
-    #[derive(Debug)]
-    pub enum List {
-        VariableAssignmentList,
-        ArgumentOrRedirectionList,
-        ElseifClauseList,
-        JobContinuationList,
-        AndorJobList,
-        JobConjunctionContinuationList,
-        ArgumentList,
-        JobList,
-        CaseItemList,
-    }
+    fn as_mut_node(&mut self) -> NodeRefMut<'_>;
 }
 
 /// Trait for all "leaf" nodes: nodes with no ast children.
 #[enum_dispatch]
+#[blanket_ref]
 pub trait Leaf: Node {
     /// Returns none if this node is "unsourced." This happens if for whatever reason we are
     /// unable to parse the node, either because we had a parse error and recovered, or because
@@ -500,6 +156,7 @@ pub trait Leaf: Node {
 
 // A token node is a node which contains a token, which must be one of a fixed set.
 #[enum_dispatch]
+#[blanket_ref]
 pub trait Token: Leaf {
     /// The token type which was parsed.
     fn token_type(&self) -> ParseTokenType;
@@ -513,6 +170,7 @@ pub trait Token: Leaf {
 
 /// A keyword node is a node which contains a keyword, which must be one of a fixed set.
 #[enum_dispatch]
+#[blanket_ref]
 pub trait Keyword: Leaf {
     fn keyword(&self) -> ParseKeyword;
     fn keyword_mut(&mut self) -> &mut ParseKeyword;
@@ -550,127 +208,102 @@ trait CheckParse {
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool;
 }
 
-impl<T: Node> Node for &T {
-    fn parent(&self) -> Option<&dyn Node> {
-        T::parent(self)
+pub use NodeRef as NodeEnumRef;
+
+define_node! {
+    #[derive(Debug)]
+    #[enum_dispatch(Acceptor, Node)]
+    #[enum_dispatch(AcceptorMut, NodeMut)]
+    pub enum Node {
+        Branch,
+        Leaf,
+        List,
     }
-    fn typ(&self) -> Type {
-        T::typ(self)
+
+    #[derive(Debug)]
+    #[enum_dispatch(Acceptor, Node)]
+    #[enum_dispatch(AcceptorMut, NodeMut)]
+    pub enum Branch {
+        Redirection,
+        ArgumentOrRedirection,
+        Statement,
+        JobPipeline,
+        JobConjunction,
+        ForHeader,
+        WhileHeader,
+        FunctionHeader,
+        BeginHeader,
+        BlockStatement,
+        IfClause,
+        ElseifClause,
+        ElseClause,
+        IfStatement,
+        CaseItem,
+        SwitchStatement,
+        DecoratedStatement,
+        NotStatement,
+        JobContinuation,
+        JobConjunctionContinuation,
+        AndorJob,
+        FreestandingArgumentList,
     }
-    fn category(&self) -> Category {
-        T::category(self)
+
+    #[derive(Debug)]
+    #[enum_dispatch(Acceptor, Node)]
+    #[enum_dispatch(AcceptorMut, NodeMut)]
+    pub enum List {
+        VariableAssignmentList,
+        ArgumentOrRedirectionList,
+        ElseifClauseList,
+        JobContinuationList,
+        AndorJobList,
+        JobConjunctionContinuationList,
+        ArgumentList,
+        JobList,
+        CaseItemList,
     }
-    fn try_source_range(&self) -> Option<SourceRange> {
-        T::try_source_range(self)
+
+    #[derive(Debug)]
+    #[enum_dispatch(Acceptor, Node, Leaf)]
+    #[enum_dispatch(AcceptorMut, NodeMut)]
+    pub enum Leaf {
+        VariableAssignment,
+        MaybeNewlines,
+        Argument,
+        Keyword,
+        Token,
     }
-    fn as_ptr(&self) -> *const () {
-        T::as_ptr(self)
+
+    #[derive(Debug)]
+    #[enum_dispatch(Acceptor, Node, Leaf, Keyword)]
+    #[enum_dispatch(AcceptorMut, NodeMut)]
+    pub enum Keyword {
+        DecoratedStatementDecorator,
+        JobConjunctionDecorator,
+        KeywordBegin,
+        KeywordCase,
+        KeywordElse,
+        KeywordEnd,
+        KeywordFor,
+        KeywordFunction,
+        KeywordIf,
+        KeywordIn,
+        KeywordNot,
+        KeywordSwitch,
+        KeywordTime,
+        KeywordWhile,
     }
-    fn as_node(&self) -> NodeEnumRef<'_> {
-        T::as_node(self)
-    }
-}
-impl<T: Node> Node for &mut T {
-    fn parent(&self) -> Option<&dyn Node> {
-        T::parent(self)
-    }
-    fn typ(&self) -> Type {
-        T::typ(self)
-    }
-    fn category(&self) -> Category {
-        T::category(self)
-    }
-    fn try_source_range(&self) -> Option<SourceRange> {
-        T::try_source_range(self)
-    }
-    fn as_ptr(&self) -> *const () {
-        T::as_ptr(self)
-    }
-    fn as_node(&self) -> NodeEnumRef<'_> {
-        T::as_node(self)
-    }
-}
-impl<T: Acceptor> Acceptor for &T {
-    fn accept<'a>(&'a self, visitor: &mut impl NodeVisitor<'a>, reversed: bool) {
-        T::accept(self, visitor, reversed)
-    }
-}
-impl<T: Acceptor> Acceptor for &mut T {
-    fn accept<'a>(&'a self, visitor: &mut impl NodeVisitor<'a>, reversed: bool) {
-        T::accept(self, visitor, reversed)
-    }
-}
-impl<T: Leaf> Leaf for &T {
-    fn range(&self) -> Option<SourceRange> {
-        T::range(self)
-    }
-    // TODO: make this unnecessary
-    fn range_mut(&mut self) -> &mut Option<SourceRange> {
-        unimplemented!()
-    }
-}
-impl<T: Leaf> Leaf for &mut T {
-    fn range(&self) -> Option<SourceRange> {
-        T::range(self)
-    }
-    fn range_mut(&mut self) -> &mut Option<SourceRange> {
-        T::range_mut(self)
-    }
-}
-impl<T: Keyword> Keyword for &T {
-    fn keyword(&self) -> ParseKeyword {
-        T::keyword(self)
-    }
-    // TODO: make this unnecessary
-    fn keyword_mut(&mut self) -> &mut ParseKeyword {
-        unimplemented!()
-    }
-    fn allowed_keywords(&self) -> &'static [ParseKeyword] {
-        T::allowed_keywords(self)
-    }
-}
-impl<T: Keyword> Keyword for &mut T {
-    fn keyword(&self) -> ParseKeyword {
-        T::keyword(self)
-    }
-    fn keyword_mut(&mut self) -> &mut ParseKeyword {
-        T::keyword_mut(self)
-    }
-    fn allowed_keywords(&self) -> &'static [ParseKeyword] {
-        T::allowed_keywords(self)
-    }
-}
-impl<T: Token> Token for &T {
-    fn token_type(&self) -> ParseTokenType {
-        T::token_type(self)
-    }
-    // TODO: make this unnecessary
-    fn token_type_mut(&mut self) -> &mut ParseTokenType {
-        unimplemented!()
-    }
-    fn allowed_tokens(&self) -> &'static [ParseTokenType] {
-        T::allowed_tokens(self)
-    }
-}
-impl<T: Token> Token for &mut T {
-    fn token_type(&self) -> ParseTokenType {
-        T::token_type(self)
-    }
-    fn token_type_mut(&mut self) -> &mut ParseTokenType {
-        T::token_type_mut(self)
-    }
-    fn allowed_tokens(&self) -> &'static [ParseTokenType] {
-        T::allowed_tokens(self)
-    }
-}
-impl<T: AcceptorMut> AcceptorMut for &mut T {
-    fn accept_mut(&mut self, visitor: &mut Populator<'_>, reversed: bool) {
-        T::accept_mut(self, visitor, reversed)
-    }
-}
-impl<T: NodeMut> NodeMut for &mut T {
-    fn as_mut_node(&mut self) -> NodeEnumRefMut<'_> {
-        T::as_mut_node(self)
+
+    #[derive(Debug)]
+    #[enum_dispatch(Acceptor, Node, Leaf, Token)]
+    #[enum_dispatch(AcceptorMut, NodeMut)]
+    pub enum Token {
+        SemiNl,
+        String_,
+        TokenBackground,
+        TokenConjunction,
+        TokenPipe,
+        TokenRedirection,
     }
 }
 
@@ -707,12 +340,12 @@ macro_rules! implement_node {
                 (self as *const $name).cast()
             }
             fn as_node(&self) -> NodeEnumRef<'_> {
-                NodeEnum::from_ref(self)
+                self.into()
             }
         }
         impl NodeMut for $name {
-            fn as_mut_node(&mut self) -> NodeEnumRefMut<'_> {
-                NodeEnum::from_mut(self)
+            fn as_mut_node(&mut self) -> NodeRefMut<'_> {
+                self.into()
             }
         }
     };
@@ -2259,7 +1892,7 @@ impl<'a> Iterator for Traversal<'a> {
     fn next(&mut self) -> Option<NodeEnumRef<'a>> {
         let node = self.stack.pop()?;
         // We want to visit in reverse order so the first child ends up on top of the stack.
-        node.enum_accept(self, true /* reverse */);
+        node.accept(self, true /* reverse */);
         Some(node)
     }
 }
@@ -2335,7 +1968,7 @@ impl Ast {
     pub fn top(&self) -> NodeEnumRef<'_> {
         self.top.as_node()
     }
-    fn top_mut(&mut self) -> NodeEnumRefMut<'_> {
+    fn top_mut(&mut self) -> NodeRefMut<'_> {
         self.top.as_mut_node()
     }
     /// \return whether any errors were encountered during parsing.
@@ -2672,24 +2305,24 @@ impl Populator<'_> {
 
     fn visit_mut(&mut self, node: &mut dyn NodeMut) -> VisitResult {
         match node.as_mut_node() {
-            NodeEnumRefMut::Leaf(leaf) => match leaf {
+            NodeRefMut::Leaf(leaf) => match leaf {
                 LeafRefMut::Argument(argument) => self.visit_argument(argument),
                 LeafRefMut::VariableAssignment(assign) => self.visit_variable_assignment(assign),
                 LeafRefMut::Token(token) => self.visit_token(token),
                 LeafRefMut::Keyword(keyword) => return self.visit_keyword(keyword),
                 LeafRefMut::MaybeNewlines(newlines) => self.visit_maybe_newlines(newlines),
             },
-            NodeEnumRefMut::Branch(BranchRefMut::JobContinuation(n)) => {
+            NodeRefMut::Branch(BranchRefMut::JobContinuation(n)) => {
                 self.visit_job_continuation(n);
             }
             // Visit branch nodes by just calling accept() to visit their fields.
-            NodeEnumRefMut::Branch(_branch) => {
+            NodeRefMut::Branch(_branch) => {
                 // This field is a direct embedding of an AST value.
                 node.accept_mut(self, false);
             }
             // This field is an embedding of an array of (pointers to) ContentsNode.
             // Parse as many as we can.
-            NodeEnumRefMut::List(list) => match list {
+            NodeRefMut::List(list) => match list {
                 ListRefMut::AndorJobList(l) => self.populate_list(l, false),
                 ListRefMut::ArgumentList(l) => self.populate_list(l, false),
                 ListRefMut::ArgumentOrRedirectionList(l) => self.populate_list(l, false),
@@ -3687,8 +3320,8 @@ fn parse_from_top(
     // Set all parent nodes.
     // It turns out to be more convenient to do this after the parse phase.
     match ast.top_mut() {
-        NodeEnumRefMut::List(ListRefMut::JobList(list)) => list.set_parents(),
-        NodeEnumRefMut::Branch(BranchRefMut::FreestandingArgumentList(list)) => list.set_parents(),
+        NodeRefMut::List(ListRefMut::JobList(list)) => list.set_parents(),
+        NodeRefMut::Branch(BranchRefMut::FreestandingArgumentList(list)) => list.set_parents(),
         _ => unreachable!(),
     }
 

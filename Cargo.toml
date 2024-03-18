@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-]
+members = []
 
 [workspace.package]
 rust-version = "1.67"
@@ -23,6 +22,8 @@ pcre2 = { git = "https://github.com/fish-shell/rust-pcre2", branch = "master", d
 fast-float = { git = "https://github.com/fish-shell/fast-float-rust", branch="fish" }
 hexponent = { git = "https://github.com/fish-shell/hexponent", branch="fish" }
 printf-compat = { git = "https://github.com/fish-shell/printf-compat.git", branch="fish" }
+
+fish-macros = { path = "./macros" }
 
 bitflags = "2.4.0"
 errno = "0.2.8"
