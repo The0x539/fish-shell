@@ -175,7 +175,7 @@ impl<'a> ParseExecutionContext {
     pub fn eval_node(
         &self,
         ctx: &OperationContext<'_>,
-        node: &dyn Node,
+        node: &impl Node,
         associated_block: Option<BlockId>,
     ) -> EndExecutionReason {
         match node.as_node() {

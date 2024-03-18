@@ -1923,7 +1923,7 @@ pub struct Extras {
 pub struct Ast {
     // The top node.
     // Its type depends on what was requested to parse.
-    top: Box<dyn NodeMut>,
+    top: Box<NodeEnum>,
     /// Whether any errors were encountered during parsing.
     pub any_error: bool,
     /// Extra fields.
@@ -1934,7 +1934,7 @@ pub struct Ast {
 impl Default for Ast {
     fn default() -> Ast {
         Self {
-            top: Box::<String_>::default(),
+            top: Box::new(NodeEnum::from(String_::default())),
             any_error: false,
             extras: Extras::default(),
         }
@@ -2303,7 +2303,7 @@ struct Populator<'a> {
 impl Populator<'_> {
     /// will_visit (did_visit) is called before (after) a node's fields are visited.
 
-    fn visit_mut(&mut self, node: &mut dyn NodeMut) -> VisitResult {
+    fn visit_mut(&mut self, node: &mut impl NodeMut) -> VisitResult {
         match node.as_mut_node() {
             NodeRefMut::Leaf(leaf) => match leaf {
                 LeafRefMut::Argument(argument) => self.visit_argument(argument),
@@ -2337,7 +2337,7 @@ impl Populator<'_> {
         VisitResult::Continue(())
     }
 
-    fn will_visit_fields_of(&mut self, node: &mut dyn NodeMut) {
+    fn will_visit_fields_of(&mut self, node: &impl Node) {
         FLOGF!(
             ast_construction,
             "%*swill_visit %ls",
@@ -3300,11 +3300,11 @@ fn parse_from_top(
     if top_type == Type::job_list {
         let mut list = pops.allocate::<JobList>();
         pops.populate_list(&mut *list, true /* exhaust_stream */);
-        ast.top = list;
+        ast.top = Box::new(NodeEnum::from(*list));
     } else {
         let mut list = pops.allocate::<FreestandingArgumentList>();
         pops.populate_list(&mut list.arguments, true /* exhaust_stream */);
-        ast.top = list;
+        ast.top = Box::new(NodeEnum::from(*list));
     }
 
     // Chomp trailing extras, etc.
