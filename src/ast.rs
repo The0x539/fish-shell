@@ -2348,7 +2348,7 @@ impl Populator<'_> {
         self.depth += 1
     }
 
-    fn did_visit_fields_of<'a>(&'a mut self, node: &impl Node, flow: VisitResult) {
+    fn did_visit_fields_of(&mut self, node: &impl Node, flow: VisitResult) {
         self.depth -= 1;
 
         if self.unwinding {
