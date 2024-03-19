@@ -34,8 +34,7 @@ fn test_parser() {
         if ast.errored() {
             return Err(ParserTestErrorBits::ERROR);
         }
-        let ast::NodeEnumRef::Branch(ast::BranchRef::FreestandingArgumentList(arg_list)) =
-            ast.top()
+        let ast::NodeRef::Branch(ast::BranchRef::FreestandingArgumentList(arg_list)) = ast.top()
         else {
             panic!()
         };
@@ -412,7 +411,7 @@ fn test_new_parser_ll2() {
         // Get the statement. Should only have one.
         let mut statement = None;
         for n in Traversal::new(ast.top()) {
-            if let ast::NodeEnumRef::Branch(ast::BranchRef::DecoratedStatement(tmp)) = n {
+            if let ast::NodeRef::Branch(ast::BranchRef::DecoratedStatement(tmp)) = n {
                 assert!(
                     statement.is_none(),
                     "More than one decorated statement found in '{}'",
