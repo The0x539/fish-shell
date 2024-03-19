@@ -2,7 +2,7 @@
 use crate::abbrs::{self, with_abbrs};
 use crate::ast::{
     self, Argument, Ast, BlockStatement, BlockStatementHeaderVariant, BranchRef,
-    DecoratedStatement, Keyword, Leaf, LeafRef, List, Node, NodeEnumRef, NodeVisitor, Redirection,
+    DecoratedStatement, Keyword, Leaf, LeafRef, List, Node, NodeRef, NodeVisitor, Redirection,
     Token, TokenRef, VariableAssignment,
 };
 use crate::builtins::shared::builtin_exists;
@@ -297,7 +297,7 @@ fn autosuggest_parse_command(
     );
 
     // Find the first statement.
-    let NodeEnumRef::List(ast::ListRef::JobList(job_list)) = ast.top() else {
+    let NodeRef::List(ast::ListRef::JobList(job_list)) = ast.top() else {
         panic!()
     };
     let jc = job_list.get(0)?;
@@ -1315,7 +1315,7 @@ impl<'s> Highlighter<'s> {
             self.pending_variables.push(var_name);
         }
     }
-    fn visit_semi_nl(&mut self, node: NodeEnumRef<'_>) {
+    fn visit_semi_nl(&mut self, node: NodeRef<'_>) {
         self.color_node(
             node,
             HighlightSpec::with_fg(HighlightRole::statement_terminator),
@@ -1449,9 +1449,9 @@ fn contains_pending_variable(pending_variables: &[&wstr], haystack: &wstr) -> bo
 }
 
 impl<'s, 'a> NodeVisitor<'a> for Highlighter<'s> {
-    fn visit(&mut self, node: NodeEnumRef<'a>) {
+    fn visit(&mut self, node: NodeRef<'a>) {
         match node {
-            NodeEnumRef::Leaf(l) => match l {
+            NodeRef::Leaf(l) => match l {
                 LeafRef::Keyword(n) => self.visit_keyword(n),
                 LeafRef::Token(TokenRef::SemiNl(n)) => self.visit_semi_nl(n.as_node()),
                 LeafRef::Token(token) => self.visit_token(token),
@@ -1460,7 +1460,7 @@ impl<'s, 'a> NodeVisitor<'a> for Highlighter<'s> {
                 _ => self.visit_children(l),
             },
 
-            NodeEnumRef::Branch(b) => match b {
+            NodeRef::Branch(b) => match b {
                 BranchRef::Redirection(n) => self.visit_redirection(n),
                 BranchRef::DecoratedStatement(n) => self.visit_decorated_statement(n),
                 BranchRef::BlockStatement(n) => self.visit_block_statement(n),

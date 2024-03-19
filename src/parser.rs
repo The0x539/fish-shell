@@ -1,6 +1,6 @@
 // The fish parser. Contains functions for parsing and evaluating code.
 
-use crate::ast::{Ast, BranchRef, List, ListRef, Node, NodeEnumRef};
+use crate::ast::{Ast, BranchRef, List, ListRef, Node, NodeRef};
 use crate::builtins::shared::STATUS_ILLEGAL_CMD;
 use crate::common::{
     escape_string, scoped_push_replacer, CancelChecker, EscapeFlags, EscapeStringStyle,
@@ -474,7 +474,7 @@ impl Parser {
         block_type: BlockType,
     ) -> EvalRes {
         assert!([BlockType::top, BlockType::subst].contains(&block_type));
-        let NodeEnumRef::List(ListRef::JobList(job_list)) = ps.ast.top() else {
+        let NodeRef::List(ListRef::JobList(job_list)) = ps.ast.top() else {
             panic!()
         };
         if !job_list.is_empty() {
@@ -618,7 +618,7 @@ impl Parser {
 
         // Get the root argument list and extract arguments from it.
         let mut result = vec![];
-        let NodeEnumRef::Branch(BranchRef::FreestandingArgumentList(list)) = ast.top() else {
+        let NodeRef::Branch(BranchRef::FreestandingArgumentList(list)) = ast.top() else {
             panic!()
         };
         for arg in &list.arguments {

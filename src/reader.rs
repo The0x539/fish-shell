@@ -4307,9 +4307,7 @@ fn extract_tokens(s: &wstr) -> Vec<PositionedToken> {
     let is_command = |node: &dyn ast::Node| -> bool {
         let mut cursor = Some(node);
         while let Some(cur) = cursor {
-            if let ast::NodeEnumRef::Branch(ast::BranchRef::DecoratedStatement(stmt)) =
-                cur.as_node()
-            {
+            if let ast::NodeRef::Branch(ast::BranchRef::DecoratedStatement(stmt)) = cur.as_node() {
                 if stmt.opt_decoration.is_none() && node.pointer_eq(&stmt.command) {
                     return true;
                 }

@@ -1,7 +1,7 @@
 //! Various mostly unrelated utility functions related to parsing, loading and evaluating fish code.
 use crate::ast::{
-    self, Ast, BranchRef, Keyword, Leaf, LeafRef, List, ListRef, Node, NodeEnumRef, NodeVisitor,
-    Token, TokenRef,
+    self, Ast, BranchRef, Keyword, Leaf, LeafRef, List, ListRef, Node, NodeRef, NodeVisitor, Token,
+    TokenRef,
 };
 use crate::builtins::shared::builtin_exists;
 use crate::common::{
@@ -910,19 +910,19 @@ impl<'a> IndentVisitor<'a> {
 }
 impl<'a> NodeVisitor<'a> for IndentVisitor<'a> {
     // Default implementation is to just visit children.
-    fn visit(&mut self, node: NodeEnumRef<'a>) {
+    fn visit(&mut self, node: NodeRef<'a>) {
         let mut inc = 0;
         let mut dec = 0;
         use ast::{Category, Type};
         match node {
-            NodeEnumRef::List(ListRef::JobList(_) | ListRef::AndorJobList(_)) => {
+            NodeRef::List(ListRef::JobList(_) | ListRef::AndorJobList(_)) => {
                 // Job lists are never unwound.
                 inc = 1;
                 dec = 1;
             }
 
             // Increment indents for conditions in headers (#1665).
-            NodeEnumRef::Branch(BranchRef::JobConjunction(_)) => {
+            NodeRef::Branch(BranchRef::JobConjunction(_)) => {
                 if [Type::while_header, Type::if_clause].contains(&node.parent().unwrap().typ()) {
                     inc = 1;
                     dec = 1;
@@ -938,7 +938,7 @@ impl<'a> NodeVisitor<'a> for IndentVisitor<'a> {
             //   ....cmd3
             //   end
             // See #7252.
-            NodeEnumRef::Branch(BranchRef::JobContinuation(n)) => {
+            NodeRef::Branch(BranchRef::JobContinuation(n)) => {
                 if self.has_newline(&n.newlines) {
                     inc = 1;
                     dec = 1;
@@ -946,14 +946,14 @@ impl<'a> NodeVisitor<'a> for IndentVisitor<'a> {
             }
 
             // Likewise for && and ||.
-            NodeEnumRef::Branch(BranchRef::JobConjunctionContinuation(n)) => {
+            NodeRef::Branch(BranchRef::JobConjunctionContinuation(n)) => {
                 if self.has_newline(&n.newlines) {
                     inc = 1;
                     dec = 1;
                 }
             }
 
-            NodeEnumRef::List(ListRef::CaseItemList(_)) => {
+            NodeRef::List(ListRef::CaseItemList(_)) => {
                 // Here's a hack. Consider:
                 // switch abc
                 //    cas
@@ -972,7 +972,7 @@ impl<'a> NodeVisitor<'a> for IndentVisitor<'a> {
                 // To address this, if we see that the switch statement was not closed, do not
                 // decrement the indent afterwards.
                 inc = 1;
-                let NodeEnumRef::Branch(BranchRef::SwitchStatement(switchs)) =
+                let NodeRef::Branch(BranchRef::SwitchStatement(switchs)) =
                     node.parent().unwrap().as_node()
                 else {
                     panic!()
@@ -980,7 +980,7 @@ impl<'a> NodeVisitor<'a> for IndentVisitor<'a> {
                 dec = if switchs.end.has_source() { 1 } else { 0 };
             }
 
-            NodeEnumRef::Leaf(LeafRef::Token(TokenRef::SemiNl(n))) => {
+            NodeRef::Leaf(LeafRef::Token(TokenRef::SemiNl(n))) => {
                 if n.parent().unwrap().typ() == Type::begin_header {
                     // The newline after "begin" is optional, so it is part of the header.
                     // The header is not in the indented block, so indent the newline here.
@@ -1115,7 +1115,7 @@ pub fn parse_util_detect_errors_in_ast(
 
     for node in ast::Traversal::new(ast.top()) {
         match node {
-            NodeEnumRef::Branch(b) => match b {
+            NodeRef::Branch(b) => match b {
                 BranchRef::JobContinuation(jc) => {
                     // Somewhat clumsy way of checking for a statement without source in a pipeline.
                     // See if our pipe has source but our statement does not.
@@ -1181,7 +1181,7 @@ pub fn parse_util_detect_errors_in_ast(
                 }
                 _ => {}
             },
-            NodeEnumRef::Leaf(ast::LeafRef::Argument(arg)) => {
+            NodeRef::Leaf(ast::LeafRef::Argument(arg)) => {
                 let arg_src = arg.source(buff_src);
                 res |= parse_util_detect_errors_in_argument(arg, arg_src, &mut out_errors)
                     .err()
@@ -1231,7 +1231,7 @@ pub fn parse_util_detect_errors_in_argument_list(
 
     // Get the root argument list and extract arguments from it.
     // Test each of these.
-    let NodeEnumRef::Branch(BranchRef::FreestandingArgumentList(arg_list)) = ast.top() else {
+    let NodeRef::Branch(BranchRef::FreestandingArgumentList(arg_list)) = ast.top() else {
         panic!()
     };
     for arg in &arg_list.arguments {
@@ -1467,14 +1467,14 @@ fn detect_errors_in_backgrounded_job(
     // foo & ; or bar
     // if foo & ; end
     // while foo & ; end
-    let NodeEnumRef::Branch(BranchRef::JobConjunction(job_conj)) = job.parent().unwrap().as_node()
+    let NodeRef::Branch(BranchRef::JobConjunction(job_conj)) = job.parent().unwrap().as_node()
     else {
         return false;
     };
 
     let mut errored = false;
 
-    if let NodeEnumRef::Branch(BranchRef::IfClause(_) | BranchRef::WhileHeader(_)) =
+    if let NodeRef::Branch(BranchRef::IfClause(_) | BranchRef::WhileHeader(_)) =
         job_conj.parent().unwrap().as_node()
     {
         errored = append_syntax_error!(
@@ -1483,8 +1483,7 @@ fn detect_errors_in_backgrounded_job(
             source_range.length(),
             BACKGROUND_IN_CONDITIONAL_ERROR_MSG
         );
-    } else if let NodeEnumRef::List(ListRef::JobList(jlist)) = job_conj.parent().unwrap().as_node()
-    {
+    } else if let NodeRef::List(ListRef::JobList(jlist)) = job_conj.parent().unwrap().as_node() {
         // This isn't very complete, e.g. we don't catch 'foo & ; not and bar'.
         // Find the index of ourselves in the job list.
         let index = jlist
@@ -1537,7 +1536,7 @@ fn detect_errors_in_decorated_statement(
     }
 
     // Get the statement we are part of.
-    let NodeEnumRef::Branch(BranchRef::Statement(st)) = dst.parent().unwrap().as_node() else {
+    let NodeRef::Branch(BranchRef::Statement(st)) = dst.parent().unwrap().as_node() else {
         panic!()
     };
 
@@ -1546,7 +1545,7 @@ fn detect_errors_in_decorated_statement(
     let mut cursor = dst.parent();
     while job.is_none() {
         let c = cursor.expect("Reached root without finding a job");
-        if let NodeEnumRef::Branch(BranchRef::JobPipeline(j)) = c.as_node() {
+        if let NodeRef::Branch(BranchRef::JobPipeline(j)) = c.as_node() {
             job = Some(j);
         }
         cursor = c.parent();
@@ -1661,7 +1660,7 @@ fn detect_errors_in_decorated_statement(
             let mut found_loop = false;
             let mut ancestor: Option<&dyn Node> = Some(dst);
             while let Some(anc) = ancestor {
-                if let NodeEnumRef::Branch(BranchRef::BlockStatement(block)) = anc.as_node() {
+                if let NodeRef::Branch(BranchRef::BlockStatement(block)) = anc.as_node() {
                     if [ast::Type::for_header, ast::Type::while_header]
                         .contains(&block.header.typ())
                     {

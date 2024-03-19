@@ -36,7 +36,7 @@ use std::ops::{ControlFlow, Index, IndexMut};
  *    node.accept(&mut v);
  */
 pub trait NodeVisitor<'a> {
-    fn visit(&mut self, node: NodeEnumRef<'a>);
+    fn visit(&mut self, node: NodeRef<'a>);
 }
 
 #[enum_dispatch]
@@ -94,10 +94,10 @@ pub trait Node: Acceptor + std::fmt::Debug {
     /// \return a helpful string description of this node.
     fn describe(&self) -> WString {
         match self.as_node() {
-            NodeEnumRef::Leaf(LeafRef::Token(n)) => {
+            NodeRef::Leaf(LeafRef::Token(n)) => {
                 sprintf!(" '%ls'", n.token_type().to_wstr())
             }
-            NodeEnumRef::Leaf(LeafRef::Keyword(n)) => {
+            NodeRef::Leaf(LeafRef::Keyword(n)) => {
                 sprintf!(" '%ls'", n.keyword().to_wstr())
             }
             _ => ast_type_to_string(self.typ()).to_owned(),
@@ -130,7 +130,7 @@ pub trait Node: Acceptor + std::fmt::Debug {
         std::ptr::eq(self.as_ptr(), rhs.as_ptr())
     }
 
-    fn as_node(&self) -> NodeEnumRef<'_>;
+    fn as_node(&self) -> NodeRef<'_>;
 }
 
 /// NodeMut is a mutable node.
@@ -207,8 +207,6 @@ trait CheckParse {
     /// A true return means we should descend into the production, false means stop.
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool;
 }
-
-pub use NodeRef as NodeEnumRef;
 
 define_node! {
     #[derive(Debug)]
@@ -339,7 +337,7 @@ macro_rules! implement_node {
             fn as_ptr(&self) -> *const () {
                 (self as *const $name).cast()
             }
-            fn as_node(&self) -> NodeEnumRef<'_> {
+            fn as_node(&self) -> NodeRef<'_> {
                 self.into()
             }
         }
@@ -1550,7 +1548,7 @@ impl ArgumentOrRedirectionVariant {
         self.embedded_node().try_source_range()
     }
 
-    fn embedded_node(&self) -> NodeEnumRef<'_> {
+    fn embedded_node(&self) -> NodeRef<'_> {
         match self {
             ArgumentOrRedirectionVariant::Argument(node) => node.as_node(),
             ArgumentOrRedirectionVariant::Redirection(node) => node.as_node(),
@@ -1679,7 +1677,7 @@ impl StatementVariant {
         }
     }
 
-    fn embedded_node(&self) -> NodeEnumRef {
+    fn embedded_node(&self) -> NodeRef {
         match self {
             StatementVariant::None => panic!("cannot visit null statement"),
             StatementVariant::NotStatement(node) => node.as_node(),
@@ -1792,7 +1790,7 @@ impl BlockStatementHeaderVariant {
         }
     }
 
-    fn embedded_node(&self) -> NodeEnumRef<'_> {
+    fn embedded_node(&self) -> NodeRef<'_> {
         match self {
             BlockStatementHeaderVariant::None => panic!("cannot visit null block header"),
             BlockStatementHeaderVariant::ForHeader(node) => node.as_node(),
@@ -1877,19 +1875,19 @@ pub fn ast_type_to_string(t: Type) -> &'static wstr {
 //    let tv = Traversal::new(start);
 //    while let Some(node) = tv.next() {...}
 pub struct Traversal<'a> {
-    stack: Vec<NodeEnumRef<'a>>,
+    stack: Vec<NodeRef<'a>>,
 }
 
 impl<'a> Traversal<'a> {
     // Construct starting with a node
-    pub fn new(n: NodeEnumRef<'a>) -> Self {
+    pub fn new(n: NodeRef<'a>) -> Self {
         Self { stack: vec![n] }
     }
 }
 
 impl<'a> Iterator for Traversal<'a> {
-    type Item = NodeEnumRef<'a>;
-    fn next(&mut self) -> Option<NodeEnumRef<'a>> {
+    type Item = NodeRef<'a>;
+    fn next(&mut self) -> Option<NodeRef<'a>> {
         let node = self.stack.pop()?;
         // We want to visit in reverse order so the first child ends up on top of the stack.
         node.accept(self, true /* reverse */);
@@ -1898,7 +1896,7 @@ impl<'a> Iterator for Traversal<'a> {
 }
 
 impl<'a, 'v: 'a> NodeVisitor<'v> for Traversal<'a> {
-    fn visit(&mut self, node: NodeEnumRef<'v>) {
+    fn visit(&mut self, node: NodeRef<'v>) {
         self.stack.push(node)
     }
 }
@@ -1965,7 +1963,7 @@ impl Ast {
         Traversal::new(self.top())
     }
     /// \return the top node. This has the type requested in the 'parse' method.
-    pub fn top(&self) -> NodeEnumRef<'_> {
+    pub fn top(&self) -> NodeRef<'_> {
         self.top.as_node()
     }
     fn top_mut(&mut self) -> NodeRefMut<'_> {
@@ -1986,14 +1984,14 @@ impl Ast {
             // dot-| padding
             result += &str::repeat("! ", depth)[..];
 
-            if let NodeEnumRef::Leaf(LeafRef::Argument(n)) = node {
+            if let NodeRef::Leaf(LeafRef::Argument(n)) = node {
                 result += "argument";
                 if let Some(argsrc) = n.try_source(orig) {
                     sprintf!(=> &mut result, ": '%ls'", argsrc);
                 }
-            } else if let NodeEnumRef::Leaf(LeafRef::Keyword(n)) = node {
+            } else if let NodeRef::Leaf(LeafRef::Keyword(n)) = node {
                 sprintf!(=> &mut result, "keyword: %ls", n.keyword().to_wstr());
-            } else if let NodeEnumRef::Leaf(LeafRef::Token(n)) = node {
+            } else if let NodeRef::Leaf(LeafRef::Token(n)) = node {
                 let desc = match n.token_type() {
                     ParseTokenType::string => {
                         let mut desc = WString::from_str("string");
@@ -2048,9 +2046,9 @@ struct SourceRangeVisitor {
 }
 
 impl<'a> NodeVisitor<'a> for SourceRangeVisitor {
-    fn visit(&mut self, node: NodeEnumRef<'a>) {
+    fn visit(&mut self, node: NodeRef<'a>) {
         match node {
-            NodeEnumRef::Leaf(leaf) => match leaf.range() {
+            NodeRef::Leaf(leaf) => match leaf.range() {
                 None => self.any_unsourced = true,
                 // Union with our range.
                 Some(range) if range.length > 0 => {
@@ -2364,7 +2362,7 @@ impl Populator<'_> {
         // incomplete; in particular parent nodes are not set.
         let mut cursor = node.as_node();
         let header = loop {
-            let NodeEnumRef::Branch(branch) = cursor else {
+            let NodeRef::Branch(branch) = cursor else {
                 break None;
             };
 
