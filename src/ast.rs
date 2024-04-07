@@ -26,7 +26,7 @@ use crate::tokenizer::{
 use crate::wchar::prelude::*;
 use enum_dispatch::enum_dispatch;
 use fish_macros::{blanket_mut, blanket_ref, define_node};
-use std::ops::{ControlFlow, Index, IndexMut};
+use std::ops::{Index, IndexMut};
 
 /**
  * A NodeVisitor is something which can visit an AST node.
@@ -55,13 +55,6 @@ impl<T: Acceptor> Acceptor for Option<T> {
         }
     }
 }
-
-pub struct MissingEndError {
-    allowed_keywords: &'static [ParseKeyword],
-    token: ParseToken,
-}
-
-pub type VisitResult = ControlFlow<MissingEndError>;
 
 #[enum_dispatch]
 #[blanket_mut]
@@ -381,7 +374,7 @@ macro_rules! implement_leaf {
             #[allow(unused_variables)]
             fn accept_mut(&mut self, visitor: &mut Populator<'_>, reversed: bool) {
                 visitor.will_visit_fields_of(self);
-                visitor.did_visit_fields_of(self, VisitResult::Continue(()));
+                visitor.did_visit_fields_of(self);
             }
         }
         impl SetParentRefs for $name {
@@ -501,10 +494,10 @@ macro_rules! define_list_node {
             #[allow(unused_variables)]
             fn accept_mut(&mut self, visitor: &mut Populator<'_>, reversed: bool) {
                 visitor.will_visit_fields_of(self);
-                let flow = accept_list_visitor!(
+                accept_list_visitor!(
                     Self, accept_mut, visit_mut, self, visitor, reversed, $contents
                 );
-                visitor.did_visit_fields_of(self, flow);
+                visitor.did_visit_fields_of(self);
             }
         }
         impl SetParentRefs for $name {
@@ -531,26 +524,16 @@ macro_rules! accept_list_visitor {
         $reversed:ident,
         $list_element:ident
     ) => {
-        loop {
-            let mut result = VisitResult::Continue(());
-            // list types pretend their child nodes are direct embeddings.
-            // This isn't used during AST construction because we need to construct the list.
-            if $reversed {
-                for i in (0..$self.count()).rev() {
-                    result = accept_list_visitor_impl!($self, $visitor, $visit, $self[i]);
-                    if result.is_break() {
-                        break;
-                    }
-                }
-            } else {
-                for i in 0..$self.count() {
-                    result = accept_list_visitor_impl!($self, $visitor, $visit, $self[i]);
-                    if result.is_break() {
-                        break;
-                    }
-                }
+        // list types pretend their child nodes are direct embeddings.
+        // This isn't used during AST construction because we need to construct the list.
+        if $reversed {
+            for i in (0..$self.count()).rev() {
+                accept_list_visitor_impl!($self, $visitor, $visit, $self[i]);
             }
-            break result;
+        } else {
+            for i in 0..$self.count() {
+                accept_list_visitor_impl!($self, $visitor, $visit, $self[i]);
+            }
         }
     };
 }
@@ -560,15 +543,16 @@ macro_rules! accept_list_visitor_impl {
         $self:ident,
         $visitor:ident,
         visit,
-        $child:expr) => {{
-        $visitor.visit($child.as_node());
-        VisitResult::Continue(())
-    }};
+        $child:expr
+    ) => {
+        $visitor.visit($child.as_node())
+    };
     (
         $self:ident,
         $visitor:ident,
         visit_mut,
-        $child:expr) => {
+        $child:expr
+    ) => {
         $visitor.visit_mut(&mut $child)
     };
 }
@@ -584,8 +568,6 @@ macro_rules! implement_acceptor_for_branch {
             #[allow(unused_variables)]
             fn accept<'a>(&'a self, visitor: &mut impl NodeVisitor<'a>, reversed: bool){
                 visitor_accept_field!(
-                    Self,
-                    accept,
                     visit,
                     self,
                     visitor,
@@ -597,15 +579,13 @@ macro_rules! implement_acceptor_for_branch {
             #[allow(unused_variables)]
             fn accept_mut(&mut self, visitor: &mut Populator<'_>, reversed: bool) {
                 visitor.will_visit_fields_of(self);
-                let flow = visitor_accept_field!(
-                                Self,
-                                accept_mut,
+                visitor_accept_field!(
                                 visit_mut,
                                 self,
                                 visitor,
                                 reversed,
                                 ( $( $field_name: $field_type, )* ));
-                visitor.did_visit_fields_of(self, flow);
+                visitor.did_visit_fields_of(self);
             }
         }
         impl SetParentRefs for $name {
@@ -622,26 +602,8 @@ macro_rules! implement_acceptor_for_branch {
     }
 }
 
-/// Visit the given fields in order, returning whether the visitation succeeded.
+/// Visit the given fields in order.
 macro_rules! visitor_accept_field {
-    (
-        $Self:ident,
-        $accept:ident,
-        $visit:ident,
-        $self:ident,
-        $visitor:ident,
-        $reversed:ident,
-        $fields:tt
-    ) => {
-        loop {
-            visitor_accept_field_impl!($visit, $self, $visitor, $reversed, $fields);
-            break VisitResult::Continue(());
-        }
-    };
-}
-
-/// Visit the given fields in order, breaking if a visitation fails.
-macro_rules! visitor_accept_field_impl {
     // Base case: no fields left to visit.
     (
         $visit:ident,
@@ -662,13 +624,13 @@ macro_rules! visitor_accept_field_impl {
         )
     ) => {
         if !$reversed {
-            visit_1_field!($visit, ($self.$field_name), $field_type, $visitor);
+            visit_1_field!($visit, $self, ($self.$field_name), $field_type, $visitor);
         }
-        visitor_accept_field_impl!(
+        visitor_accept_field!(
             $visit, $self, $visitor, $reversed,
             ( $( $field_names: $field_types, )* ));
         if $reversed {
-            visit_1_field!($visit, ($self.$field_name), $field_type, $visitor);
+            visit_1_field!($visit, $self, ($self.$field_name), $field_type, $visitor);
         }
     }
 }
@@ -677,29 +639,40 @@ macro_rules! visitor_accept_field_impl {
 macro_rules! visit_1_field {
     (
         visit,
+        $self:expr,
         $field:expr,
         $field_type:tt,
         $visitor:ident
     ) => {
-        visit_1_field_impl!(visit, $field, $field_type, $visitor);
+        visit_1_field_impl!(visit, $self, $field, $field_type, $visitor);
     };
     (
         visit_mut,
+        $self:expr,
         $field:expr,
         $field_type:tt,
         $visitor:ident
     ) => {
-        let result = visit_1_field_impl!(visit_mut, $field, $field_type, $visitor);
-        if result.is_break() {
-            break result;
-        }
+        visit_1_field_impl!(visit_mut, $self, $field, $field_type, $visitor)
     };
 }
 
 /// Visit the given field.
 macro_rules! visit_1_field_impl {
     (
+        visit_mut,
+        $self:expr,
+        $field:expr,
+        (KeywordEnd),
+        $visitor:ident
+    ) => {
+        $visitor.current_block_header_keyword = Some($self.get_current_block_header_keyword());
+        $visitor.visit_mut(&mut $field);
+        $visitor.current_block_header_keyword = None;
+    };
+    (
         $visit:ident,
+        $self:expr,
         $field:expr,
         (Box<$field_type:ident>),
         $visitor:ident
@@ -708,6 +681,7 @@ macro_rules! visit_1_field_impl {
     };
     (
         $visit:ident,
+        $self:expr,
         $field:expr,
         (Option<$field_type:ident>),
         $visitor:ident
@@ -715,21 +689,22 @@ macro_rules! visit_1_field_impl {
         visit_optional_field!($visit, $field_type, $field, $visitor)
     };
     (
-        $visit:ident,
+        visit,
+        $self:expr,
         $field:expr,
         $field_type:tt,
         $visitor:ident
     ) => {
-        $visitor.$visit(apply_borrow!($visit, $field))
+        $visitor.visit($field.as_node())
     };
-}
-
-macro_rules! apply_borrow {
-    ( visit, $expr:expr ) => {
-        $expr.as_node()
-    };
-    ( visit_mut, $expr:expr ) => {
-        &mut $expr
+    (
+        visit_mut,
+        $self:expr,
+        $field:expr,
+        $field_type:tt,
+        $visitor:ident
+    ) => {
+        $visitor.visit_mut(&mut $field)
     };
 }
 
@@ -780,10 +755,9 @@ macro_rules! visit_optional_field {
         $field_type:ident,
         $field:expr,
         $visitor:ident
-    ) => {{
+    ) => {
         $field = $visitor.try_parse().map(|x| *x);
-        VisitResult::Continue(())
-    }};
+    };
 }
 
 /// A redirection has an operator like > or 2>, and a target like /dev/null or &1.
@@ -995,6 +969,11 @@ implement_acceptor_for_branch!(
     (end: (KeywordEnd)),
     (args_or_redirs: (ArgumentOrRedirectionList)),
 );
+impl BlockStatement {
+    fn get_current_block_header_keyword(&self) -> (SourceRange, &'static wstr) {
+        self.header.get_current_block_header_keyword()
+    }
+}
 
 #[derive(Default, Debug)]
 pub struct IfClause {
@@ -1084,6 +1063,11 @@ implement_acceptor_for_branch!(
     (end: (KeywordEnd)),
     (args_or_redirs: (ArgumentOrRedirectionList)),
 );
+impl IfStatement {
+    fn get_current_block_header_keyword(&self) -> (SourceRange, &'static wstr) {
+        (self.if_clause.kw_if.range.unwrap(), L!("if statement"))
+    }
+}
 
 #[derive(Default, Debug)]
 pub struct CaseItem {
@@ -1129,6 +1113,11 @@ implement_acceptor_for_branch!(
     (end: (KeywordEnd)),
     (args_or_redirs: (ArgumentOrRedirectionList)),
 );
+impl SwitchStatement {
+    fn get_current_block_header_keyword(&self) -> (SourceRange, &'static wstr) {
+        (self.kw_switch.range.unwrap(), L!("switch statement"))
+    }
+}
 
 /// A decorated_statement is a command with a list of arguments_or_redirections, possibly with
 /// "builtin" or "command" or "exec"
@@ -1562,6 +1551,18 @@ pub enum BlockStatementHeaderVariant {
     WhileHeader(WhileHeader),
     FunctionHeader(FunctionHeader),
     BeginHeader(BeginHeader),
+}
+
+impl BlockStatementHeaderVariant {
+    fn get_current_block_header_keyword(&self) -> (SourceRange, &'static wstr) {
+        match self {
+            Self::None => panic!(),
+            Self::ForHeader(h) => (h.kw_for.range.unwrap(), L!("for loop")),
+            Self::WhileHeader(h) => (h.kw_while.range.unwrap(), L!("while loop")),
+            Self::FunctionHeader(h) => (h.kw_function.range.unwrap(), L!("function definition")),
+            Self::BeginHeader(h) => (h.kw_begin.range.unwrap(), L!("begin")),
+        }
+    }
 }
 
 impl SetParentRefs for BlockStatementHeaderVariant {
@@ -2102,18 +2103,21 @@ struct Populator<'a> {
 
     // If non-null, populate with errors.
     out_errors: Option<&'a mut ParseErrorList>,
+
+    // Used for emitting nicer error messages for block statements with no `end`.
+    current_block_header_keyword: Option<(SourceRange, &'static wstr)>,
 }
 
 impl Populator<'_> {
     /// will_visit (did_visit) is called before (after) a node's fields are visited.
 
-    fn visit_mut(&mut self, node: &mut impl NodeMut) -> VisitResult {
+    fn visit_mut(&mut self, node: &mut impl NodeMut) {
         match node.as_mut_node() {
             NodeRefMut::Leaf(leaf) => match leaf {
                 LeafRefMut::Argument(argument) => self.visit_argument(argument),
                 LeafRefMut::VariableAssignment(assign) => self.visit_variable_assignment(assign),
                 LeafRefMut::Token(token) => self.visit_token(token),
-                LeafRefMut::Keyword(keyword) => return self.visit_keyword(keyword),
+                LeafRefMut::Keyword(keyword) => self.visit_keyword(keyword),
                 LeafRefMut::MaybeNewlines(newlines) => self.visit_maybe_newlines(newlines),
             },
             NodeRefMut::Branch(BranchRefMut::JobContinuation(n)) => {
@@ -2138,7 +2142,6 @@ impl Populator<'_> {
                 ListRefMut::VariableAssignmentList(l) => self.populate_list(l, false),
             },
         }
-        VisitResult::Continue(())
     }
 
     fn will_visit_fields_of(&mut self, node: &impl Node) {
@@ -2152,70 +2155,13 @@ impl Populator<'_> {
         self.depth += 1
     }
 
-    fn did_visit_fields_of(&mut self, node: &impl Node, flow: VisitResult) {
+    fn did_visit_fields_of(&mut self, _node: &impl Node) {
         self.depth -= 1;
-
-        if self.unwinding {
-            return;
-        }
-        let VisitResult::Break(error) = flow else {
-            return;
-        };
-
-        // We believe the node is some sort of block statement. Attempt to find a source range
-        // for the block's keyword (for, if, etc) and a user-presentable description. This
-        // is used to provide better error messages. Note at this point the parse tree is
-        // incomplete; in particular parent nodes are not set.
-        let mut cursor = node.as_node();
-        let header = loop {
-            let NodeRef::Branch(branch) = cursor else {
-                break None;
-            };
-
-            if let BranchRef::BlockStatement(n) = branch {
-                cursor = n.header.embedded_node();
-                continue;
-            }
-
-            let (range, stmt) = match branch {
-                BranchRef::ForHeader(n) => (n.kw_for.range, L!("for loop")),
-                BranchRef::WhileHeader(n) => (n.kw_while.range, L!("while loop")),
-                BranchRef::FunctionHeader(n) => (n.kw_function.range, L!("function definition")),
-                BranchRef::BeginHeader(n) => (n.kw_begin.range, L!("begin")),
-                BranchRef::IfStatement(n) => (n.if_clause.kw_if.range, L!("if statement")),
-                BranchRef::SwitchStatement(n) => (n.kw_switch.range, L!("switch statement")),
-                _ => break None,
-            };
-
-            break Some((range.unwrap(), stmt));
-        };
-
-        if let Some((header_kw_range, enclosing_stmt)) = header {
-            parse_error_range!(
-                self,
-                header_kw_range,
-                ParseErrorCode::generic,
-                "Missing end to balance this %ls",
-                enclosing_stmt
-            );
-        } else {
-            parse_error!(
-                self,
-                error.token,
-                ParseErrorCode::generic,
-                "Expected %ls, but found %ls",
-                keywords_user_presentable_description(error.allowed_keywords),
-                error.token.user_presentable_description(),
-            );
-        }
     }
 
     // We currently only have a handful of union pointer types.
     // Handle them directly.
-    fn visit_argument_or_redirection(
-        &mut self,
-        node: &mut Box<ArgumentOrRedirectionVariant>,
-    ) -> VisitResult {
+    fn visit_argument_or_redirection(&mut self, node: &mut Box<ArgumentOrRedirectionVariant>) {
         if let Some(arg) = self.try_parse::<Argument>() {
             **node = ArgumentOrRedirectionVariant::Argument(*arg);
         } else if let Some(redir) = self.try_parse::<Redirection>() {
@@ -2227,18 +2173,12 @@ impl Populator<'_> {
                 "Unable to parse argument or redirection"
             );
         }
-        VisitResult::Continue(())
     }
-    fn visit_block_statement_header(
-        &mut self,
-        node: &mut Box<BlockStatementHeaderVariant>,
-    ) -> VisitResult {
+    fn visit_block_statement_header(&mut self, node: &mut Box<BlockStatementHeaderVariant>) {
         *node = self.allocate_populate_block_header();
-        VisitResult::Continue(())
     }
-    fn visit_statement(&mut self, node: &mut Box<StatementVariant>) -> VisitResult {
+    fn visit_statement(&mut self, node: &mut Box<StatementVariant>) {
         *node = self.allocate_populate_statement_contents();
-        VisitResult::Continue(())
     }
 }
 
@@ -2291,6 +2231,7 @@ impl<'s> Populator<'s> {
             any_error: false,
             depth: 0,
             out_errors,
+            current_block_header_keyword: None,
         }
     }
 
@@ -2987,10 +2928,10 @@ impl<'s> Populator<'s> {
     }
 
     // Overload for keyword fields.
-    fn visit_keyword(&mut self, mut keyword: KeywordRefMut<'_>) -> VisitResult {
+    fn visit_keyword(&mut self, mut keyword: KeywordRefMut<'_>) {
         if self.unsource_leaves() {
             *keyword.range_mut() = None;
-            return VisitResult::Continue(());
+            return;
         }
 
         if !keyword.allows_keyword(self.peek_token(0).keyword) {
@@ -3003,16 +2944,20 @@ impl<'s> Populator<'s> {
                 ]
                 .contains(&self.peek_token(0).tok_error)
             {
-                return VisitResult::Continue(());
+                return;
             }
 
             // Special error reporting for keyword_t<kw_end>.
             let allowed_keywords = keyword.allowed_keywords();
-            if keyword.allowed_keywords() == [ParseKeyword::kw_end] {
-                return VisitResult::Break(MissingEndError {
-                    allowed_keywords,
-                    token: *self.peek_token(0),
-                });
+            if let Some((header_kw_range, enclosing_stmt)) = self.current_block_header_keyword {
+                // Provide a better message for missing-end errors
+                parse_error_range!(
+                    self,
+                    header_kw_range,
+                    ParseErrorCode::generic,
+                    "Missing end to balance this %ls",
+                    enclosing_stmt
+                );
             } else {
                 parse_error!(
                     self,
@@ -3022,13 +2967,12 @@ impl<'s> Populator<'s> {
                     keywords_user_presentable_description(allowed_keywords),
                     self.peek_token(0).user_presentable_description(),
                 );
-                return VisitResult::Continue(());
             }
+            return;
         }
         let tok = self.consume_any_token();
         *keyword.keyword_mut() = tok.keyword;
         *keyword.range_mut() = Some(tok.range());
-        VisitResult::Continue(())
     }
 
     fn visit_maybe_newlines(&mut self, nls: &mut MaybeNewlines) {
