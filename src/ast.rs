@@ -771,9 +771,8 @@ macro_rules! visit_optional_field {
         $field:expr,
         $visitor:ident
     ) => {
-        match &$field {
-            Some(value) => $visitor.visit(value.as_node()),
-            None => visit_result!(visit),
+        if let Some(node) = &$field {
+            $visitor.visit(node.as_node());
         }
     };
     (
@@ -782,39 +781,9 @@ macro_rules! visit_optional_field {
         $field:expr,
         $visitor:ident
     ) => {{
-        visit_optional_field_mut!($field_type, $field, $visitor);
+        $field = $visitor.try_parse().map(|x| *x);
         VisitResult::Continue(())
     }};
-}
-
-macro_rules! visit_optional_field_mut {
-    (DecoratedStatementDecorator, $field:expr, $visitor:ident) => {
-        $visitor.visit_decorated_statement_decorator(&mut $field);
-    };
-    (JobConjunctionDecorator, $field:expr, $visitor:ident) => {
-        $visitor.visit_job_conjunction_decorator(&mut $field);
-    };
-    (ElseClause, $field:expr, $visitor:ident) => {
-        $visitor.visit_else_clause(&mut $field);
-    };
-    (SemiNl, $field:expr, $visitor:ident) => {
-        $visitor.visit_semi_nl(&mut $field);
-    };
-    (KeywordTime, $field:expr, $visitor:ident) => {
-        $visitor.visit_time(&mut $field);
-    };
-    (TokenBackground, $field:expr, $visitor:ident) => {
-        $visitor.visit_token_background(&mut $field);
-    };
-}
-
-macro_rules! visit_result {
-    ( visit) => {
-        ()
-    };
-    ( visit_mut ) => {
-        VisitResult::Continue(())
-    };
 }
 
 /// A redirection has an operator like > or 2>, and a target like /dev/null or &1.
@@ -2270,28 +2239,6 @@ impl Populator<'_> {
     fn visit_statement(&mut self, node: &mut Box<StatementVariant>) -> VisitResult {
         *node = self.allocate_populate_statement_contents();
         VisitResult::Continue(())
-    }
-
-    fn visit_decorated_statement_decorator(
-        &mut self,
-        node: &mut Option<DecoratedStatementDecorator>,
-    ) {
-        *node = self.try_parse::<DecoratedStatementDecorator>().map(|b| *b);
-    }
-    fn visit_job_conjunction_decorator(&mut self, node: &mut Option<JobConjunctionDecorator>) {
-        *node = self.try_parse::<JobConjunctionDecorator>().map(|b| *b);
-    }
-    fn visit_else_clause(&mut self, node: &mut Option<ElseClause>) {
-        *node = self.try_parse::<ElseClause>().map(|b| *b);
-    }
-    fn visit_semi_nl(&mut self, node: &mut Option<SemiNl>) {
-        *node = self.try_parse::<SemiNl>().map(|b| *b);
-    }
-    fn visit_time(&mut self, node: &mut Option<KeywordTime>) {
-        *node = self.try_parse::<KeywordTime>().map(|b| *b);
-    }
-    fn visit_token_background(&mut self, node: &mut Option<TokenBackground>) {
-        *node = self.try_parse::<TokenBackground>().map(|b| *b);
     }
 }
 
