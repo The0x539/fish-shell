@@ -208,6 +208,19 @@ trait CheckParse {
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool;
 }
 
+#[enum_dispatch]
+trait SetParentRefs {
+    fn set_parent_refs(&mut self, parent: Option<*const dyn Node>);
+}
+
+impl<T: SetParentRefs> SetParentRefs for Option<T> {
+    fn set_parent_refs(&mut self, parent: Option<*const dyn Node>) {
+        if let Some(node) = self {
+            node.set_parent_refs(parent);
+        }
+    }
+}
+
 define_node! {
     #[derive(Debug)]
     #[enum_dispatch(Acceptor, Node)]
@@ -351,7 +364,7 @@ macro_rules! implement_node {
 
 /// Implement the leaf trait.
 macro_rules! implement_leaf {
-    ( $name:ident ) => {
+    ( $name:ident, $parent:ident ) => {
         impl Leaf for $name {
             fn range(&self) -> Option<SourceRange> {
                 self.range
@@ -371,9 +384,10 @@ macro_rules! implement_leaf {
                 visitor.did_visit_fields_of(self, VisitResult::Continue(()));
             }
         }
-        impl $name {
-            /// Set the parent fields of all nodes in the tree rooted at \p self.
-            fn set_parents(&mut self) {}
+        impl SetParentRefs for $name {
+            fn set_parent_refs(&mut self, parent: Option<*const dyn Node>) {
+                self.$parent = parent;
+            }
         }
     };
 }
@@ -388,7 +402,7 @@ macro_rules! define_keyword_node {
             keyword: ParseKeyword,
         }
         implement_node!($name, leaf, keyword_base);
-        implement_leaf!($name);
+        implement_leaf!($name, parent);
         impl Keyword for $name {
             fn keyword(&self) -> ParseKeyword {
                 self.keyword
@@ -413,7 +427,7 @@ macro_rules! define_token_node {
             parse_token_type: ParseTokenType,
         }
         implement_node!($name, leaf, token_base);
-        implement_leaf!($name);
+        implement_leaf!($name, parent);
         impl Token for $name {
             fn token_type(&self) -> ParseTokenType {
                 self.parse_token_type
@@ -493,12 +507,14 @@ macro_rules! define_list_node {
                 visitor.did_visit_fields_of(self, flow);
             }
         }
-        impl $name {
+        impl SetParentRefs for $name {
             /// Set the parent fields of all nodes in the tree rooted at \p self.
-            fn set_parents(&mut self) {
+            fn set_parent_refs(&mut self, parent: Option<*const dyn Node>) {
+                self.parent = parent;
+
+                let this = Some(self as *const dyn Node);
                 for i in 0..self.count() {
-                    self[i].parent = Some(self);
-                    self[i].set_parents();
+                    self[i].set_parent_refs(this);
                 }
             }
         }
@@ -592,11 +608,14 @@ macro_rules! implement_acceptor_for_branch {
                 visitor.did_visit_fields_of(self, flow);
             }
         }
-        impl $name {
+        impl SetParentRefs for $name {
             /// Set the parent fields of all nodes in the tree rooted at \p self.
-            fn set_parents(&mut self) {
+            fn set_parent_refs(&mut self, parent: Option<*const dyn Node>) {
+                self.parent = parent;
+
+                let this = Some(self as *const dyn Node);
                 $(
-                    set_parent_of_field!(self, $field_name, $field_type);
+                    self.$field_name.set_parent_refs(this);
                 )*
             }
         }
@@ -795,106 +814,6 @@ macro_rules! visit_result {
     };
     ( visit_mut ) => {
         VisitResult::Continue(())
-    };
-}
-
-macro_rules! set_parent_of_field {
-    (
-        $self:ident,
-        $field_name:ident,
-        (Box<$field_type:ident>)
-    ) => {
-        set_parent_of_union_field!($self, $field_name, $field_type);
-    };
-    (
-        $self:ident,
-        $field_name:ident,
-        (Option<$field_type:ident>)
-    ) => {
-        if $self.$field_name.is_some() {
-            $self.$field_name.as_mut().unwrap().parent = Some($self);
-            $self.$field_name.as_mut().unwrap().set_parents();
-        }
-    };
-    (
-        $self:ident,
-        $field_name:ident,
-        $field_type:tt
-    ) => {
-        $self.$field_name.parent = Some($self);
-        $self.$field_name.set_parents();
-    };
-}
-
-macro_rules! set_parent_of_union_field {
-    (
-        $self:ident,
-        $field_name:ident,
-        ArgumentOrRedirectionVariant
-    ) => {
-        if matches!(
-            *$self.$field_name,
-            ArgumentOrRedirectionVariant::Argument(_)
-        ) {
-            $self.$field_name.as_mut_argument().parent = Some($self);
-            $self.$field_name.as_mut_argument().set_parents();
-        } else {
-            $self.$field_name.as_mut_redirection().parent = Some($self);
-            $self.$field_name.as_mut_redirection().set_parents();
-        }
-    };
-    (
-        $self:ident,
-        $field_name:ident,
-        StatementVariant
-    ) => {
-        if matches!(*$self.$field_name, StatementVariant::NotStatement(_)) {
-            $self.$field_name.as_mut_not_statement().parent = Some($self);
-            $self.$field_name.as_mut_not_statement().set_parents();
-        } else if matches!(*$self.$field_name, StatementVariant::BlockStatement(_)) {
-            $self.$field_name.as_mut_block_statement().parent = Some($self);
-            $self.$field_name.as_mut_block_statement().set_parents();
-        } else if matches!(*$self.$field_name, StatementVariant::IfStatement(_)) {
-            $self.$field_name.as_mut_if_statement().parent = Some($self);
-            $self.$field_name.as_mut_if_statement().set_parents();
-        } else if matches!(*$self.$field_name, StatementVariant::SwitchStatement(_)) {
-            $self.$field_name.as_mut_switch_statement().parent = Some($self);
-            $self.$field_name.as_mut_switch_statement().set_parents();
-        } else if matches!(*$self.$field_name, StatementVariant::DecoratedStatement(_)) {
-            $self.$field_name.as_mut_decorated_statement().parent = Some($self);
-            $self.$field_name.as_mut_decorated_statement().set_parents();
-        }
-    };
-    (
-        $self:ident,
-        $field_name:ident,
-        BlockStatementHeaderVariant
-    ) => {
-        if matches!(
-            *$self.$field_name,
-            BlockStatementHeaderVariant::ForHeader(_)
-        ) {
-            $self.$field_name.as_mut_for_header().parent = Some($self);
-            $self.$field_name.as_mut_for_header().set_parents();
-        } else if matches!(
-            *$self.$field_name,
-            BlockStatementHeaderVariant::WhileHeader(_)
-        ) {
-            $self.$field_name.as_mut_while_header().parent = Some($self);
-            $self.$field_name.as_mut_while_header().set_parents();
-        } else if matches!(
-            *$self.$field_name,
-            BlockStatementHeaderVariant::FunctionHeader(_)
-        ) {
-            $self.$field_name.as_mut_function_header().parent = Some($self);
-            $self.$field_name.as_mut_function_header().set_parents();
-        } else if matches!(
-            *$self.$field_name,
-            BlockStatementHeaderVariant::BeginHeader(_)
-        ) {
-            $self.$field_name.as_mut_begin_header().parent = Some($self);
-            $self.$field_name.as_mut_begin_header().set_parents();
-        }
     };
 }
 
@@ -1388,7 +1307,7 @@ pub struct VariableAssignment {
     range: Option<SourceRange>,
 }
 implement_node!(VariableAssignment, leaf, variable_assignment);
-implement_leaf!(VariableAssignment);
+implement_leaf!(VariableAssignment, parent);
 impl CheckParse for VariableAssignment {
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
         // Do we have a variable assignment at all?
@@ -1416,7 +1335,7 @@ pub struct MaybeNewlines {
     range: Option<SourceRange>,
 }
 implement_node!(MaybeNewlines, leaf, maybe_newlines);
-implement_leaf!(MaybeNewlines);
+implement_leaf!(MaybeNewlines, parent);
 
 /// An argument is just a node whose source range determines its contents.
 /// This is a separate type because it is sometimes useful to find all arguments.
@@ -1426,7 +1345,7 @@ pub struct Argument {
     range: Option<SourceRange>,
 }
 implement_node!(Argument, leaf, argument);
-implement_leaf!(Argument);
+implement_leaf!(Argument, parent);
 impl CheckParse for Argument {
     fn can_be_parsed(pop: &mut Populator<'_>) -> bool {
         pop.peek_type(0) == ParseTokenType::string
@@ -1512,6 +1431,7 @@ impl DecoratedStatement {
 }
 
 #[derive(Debug)]
+#[enum_dispatch(SetParentRefs)]
 pub enum ArgumentOrRedirectionVariant {
     Argument(Argument),
     Redirection(Redirection),
@@ -1552,18 +1472,6 @@ impl ArgumentOrRedirectionVariant {
         match self {
             ArgumentOrRedirectionVariant::Argument(node) => node.as_node(),
             ArgumentOrRedirectionVariant::Redirection(node) => node.as_node(),
-        }
-    }
-    fn as_mut_argument(&mut self) -> &mut Argument {
-        match self {
-            ArgumentOrRedirectionVariant::Argument(node) => node,
-            _ => panic!(),
-        }
-    }
-    fn as_mut_redirection(&mut self) -> &mut Redirection {
-        match self {
-            ArgumentOrRedirectionVariant::Redirection(redirection) => redirection,
-            _ => panic!(),
         }
     }
 }
@@ -1607,6 +1515,19 @@ pub enum StatementVariant {
     DecoratedStatement(DecoratedStatement),
 }
 
+impl SetParentRefs for StatementVariant {
+    fn set_parent_refs(&mut self, parent: Option<*const dyn Node>) {
+        match self {
+            Self::None => {}
+            Self::NotStatement(s) => s.set_parent_refs(parent),
+            Self::BlockStatement(s) => s.set_parent_refs(parent),
+            Self::IfStatement(s) => s.set_parent_refs(parent),
+            Self::SwitchStatement(s) => s.set_parent_refs(parent),
+            Self::DecoratedStatement(s) => s.set_parent_refs(parent),
+        }
+    }
+}
+
 impl Default for StatementVariant {
     fn default() -> Self {
         StatementVariant::None
@@ -1646,31 +1567,7 @@ impl StatementVariant {
         self.embedded_node().try_source_range()
     }
 
-    pub fn as_not_statement(&self) -> Option<&NotStatement> {
-        match self {
-            StatementVariant::NotStatement(node) => Some(node),
-            _ => None,
-        }
-    }
-    pub fn as_block_statement(&self) -> Option<&BlockStatement> {
-        match self {
-            StatementVariant::BlockStatement(node) => Some(node),
-            _ => None,
-        }
-    }
-    pub fn as_if_statement(&self) -> Option<&IfStatement> {
-        match self {
-            StatementVariant::IfStatement(node) => Some(node),
-            _ => None,
-        }
-    }
-    pub fn as_switch_statement(&self) -> Option<&SwitchStatement> {
-        match self {
-            StatementVariant::SwitchStatement(node) => Some(node),
-            _ => None,
-        }
-    }
-    pub fn as_decorated_statement(&self) -> Option<&DecoratedStatement> {
+    pub(crate) fn as_decorated_statement(&self) -> Option<&DecoratedStatement> {
         match self {
             StatementVariant::DecoratedStatement(node) => Some(node),
             _ => None,
@@ -1687,36 +1584,6 @@ impl StatementVariant {
             StatementVariant::DecoratedStatement(node) => node.as_node(),
         }
     }
-    fn as_mut_not_statement(&mut self) -> &mut NotStatement {
-        match self {
-            StatementVariant::NotStatement(node) => node,
-            _ => panic!(),
-        }
-    }
-    fn as_mut_block_statement(&mut self) -> &mut BlockStatement {
-        match self {
-            StatementVariant::BlockStatement(node) => node,
-            _ => panic!(),
-        }
-    }
-    fn as_mut_if_statement(&mut self) -> &mut IfStatement {
-        match self {
-            StatementVariant::IfStatement(node) => node,
-            _ => panic!(),
-        }
-    }
-    fn as_mut_switch_statement(&mut self) -> &mut SwitchStatement {
-        match self {
-            StatementVariant::SwitchStatement(node) => node,
-            _ => panic!(),
-        }
-    }
-    fn as_mut_decorated_statement(&mut self) -> &mut DecoratedStatement {
-        match self {
-            StatementVariant::DecoratedStatement(node) => node,
-            _ => panic!(),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -1726,6 +1593,18 @@ pub enum BlockStatementHeaderVariant {
     WhileHeader(WhileHeader),
     FunctionHeader(FunctionHeader),
     BeginHeader(BeginHeader),
+}
+
+impl SetParentRefs for BlockStatementHeaderVariant {
+    fn set_parent_refs(&mut self, parent: Option<*const dyn Node>) {
+        match self {
+            Self::None => {}
+            Self::ForHeader(h) => h.set_parent_refs(parent),
+            Self::WhileHeader(h) => h.set_parent_refs(parent),
+            Self::FunctionHeader(h) => h.set_parent_refs(parent),
+            Self::BeginHeader(h) => h.set_parent_refs(parent),
+        }
+    }
 }
 
 impl Default for BlockStatementHeaderVariant {
@@ -1765,27 +1644,9 @@ impl BlockStatementHeaderVariant {
         self.embedded_node().try_source_range()
     }
 
-    pub fn as_for_header(&self) -> Option<&ForHeader> {
+    pub(crate) fn as_for_header(&self) -> Option<&ForHeader> {
         match self {
             BlockStatementHeaderVariant::ForHeader(node) => Some(node),
-            _ => None,
-        }
-    }
-    pub fn as_while_header(&self) -> Option<&WhileHeader> {
-        match self {
-            BlockStatementHeaderVariant::WhileHeader(node) => Some(node),
-            _ => None,
-        }
-    }
-    pub fn as_function_header(&self) -> Option<&FunctionHeader> {
-        match self {
-            BlockStatementHeaderVariant::FunctionHeader(node) => Some(node),
-            _ => None,
-        }
-    }
-    pub fn as_begin_header(&self) -> Option<&BeginHeader> {
-        match self {
-            BlockStatementHeaderVariant::BeginHeader(node) => Some(node),
             _ => None,
         }
     }
@@ -1797,30 +1658,6 @@ impl BlockStatementHeaderVariant {
             BlockStatementHeaderVariant::WhileHeader(node) => node.as_node(),
             BlockStatementHeaderVariant::FunctionHeader(node) => node.as_node(),
             BlockStatementHeaderVariant::BeginHeader(node) => node.as_node(),
-        }
-    }
-    fn as_mut_for_header(&mut self) -> &mut ForHeader {
-        match self {
-            BlockStatementHeaderVariant::ForHeader(node) => node,
-            _ => panic!(),
-        }
-    }
-    fn as_mut_while_header(&mut self) -> &mut WhileHeader {
-        match self {
-            BlockStatementHeaderVariant::WhileHeader(node) => node,
-            _ => panic!(),
-        }
-    }
-    fn as_mut_function_header(&mut self) -> &mut FunctionHeader {
-        match self {
-            BlockStatementHeaderVariant::FunctionHeader(node) => node,
-            _ => panic!(),
-        }
-    }
-    fn as_mut_begin_header(&mut self) -> &mut BeginHeader {
-        match self {
-            BlockStatementHeaderVariant::BeginHeader(node) => node,
-            _ => panic!(),
         }
     }
 }
@@ -3318,8 +3155,10 @@ fn parse_from_top(
     // Set all parent nodes.
     // It turns out to be more convenient to do this after the parse phase.
     match ast.top_mut() {
-        NodeRefMut::List(ListRefMut::JobList(list)) => list.set_parents(),
-        NodeRefMut::Branch(BranchRefMut::FreestandingArgumentList(list)) => list.set_parents(),
+        NodeRefMut::List(ListRefMut::JobList(list)) => list.set_parent_refs(None),
+        NodeRefMut::Branch(BranchRefMut::FreestandingArgumentList(list)) => {
+            list.set_parent_refs(None)
+        }
         _ => unreachable!(),
     }
 
